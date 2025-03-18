@@ -286,16 +286,15 @@ def main():
 
             # 添加進度回調
             progress_per_epoch = 20 / epochs  # 訓練部分佔總進度的 20%，平分到每個 epoch
-            current_progress = 40  # 從步驟 2 結束的進度開始
+            if 'training_progress' not in st.session_state:
+                st.session_state['training_progress'] = 40  # 初始進度為 40%
 
-            epoch_callback = LambdaCallback(
-                on_epoch_end=lambda epoch, logs: (
-                    st.session_state.setdefault('training_progress', 40),
-                    st.session_state['training_progress'] := min(60, st.session_state['training_progress'] + progress_per_epoch),
-                    progress_bar.progress(int(st.session_state['training_progress'])),
-                    status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
-                )
-            )
+            def update_progress(epoch, logs):
+                st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
+                progress_bar.progress(int(st.session_state['training_progress']))
+                status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
+
+            epoch_callback = LambdaCallback(on_epoch_end=update_progress)
 
             history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[epoch_callback])
             
