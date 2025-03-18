@@ -37,16 +37,16 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數，支持兩種模型選擇
+# 構建模型函數
 def build_model(input_shape, model_type="original"):
     if model_type == "lstm_simple":
         model = Sequential()
         model.add(LSTM(150, activation='relu', input_shape=input_shape, return_sequences=False))
         model.add(Dropout(0.01))
-        model.add(Dense(32, activation='relu'))  # 新增一層提升波動性
+        model.add(Dense(32, activation='relu'))
         model.add(Dense(1))
         model.compile(optimizer=Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
-    else:  # 原有CNN-BiLSTM-Attention模型
+    else:
         inputs = Input(shape=input_shape)
         x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
         x = Bidirectional(LSTM(units=128, activation='tanh', return_sequences=True))(x)
@@ -115,13 +115,13 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     data['Predicted'] = np.nan
     data.iloc[-test_size:, data.columns.get_loc('Predicted')] = predictions.flatten()
 
-    # 原有MACD（保留作為參考）
+    # 原有MACD
     data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
     data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
     data['MACD'] = data['EMA12'] - data['EMA26']
     data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
-    # 預測MACD，限定在測試集範圍
+    # 預測MACD
     test_mask = data.index.isin(test_dates)
     data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12, adjust=False).mean()
     data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26, adjust=False).mean()
@@ -295,89 +295,4 @@ def main():
         period_end = pd.to_datetime(period_end)
         mask = (test_dates >= period_start) & (test_dates <= period_end)
         filtered_dates = test_dates[mask]
-        filtered_y_test = y_test[mask]
-        filtered_predictions = predictions[mask]
-
-        st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
-        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
-        buy_signals = [(d, p) for d, p in buy_signals if period_start <= d <= period_end]
-        sell_signals = [(d, p) for d, p in sell_signals if period_start <= d <= period_end]
-        buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
-        sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
-        fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
-        fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
-        fig.update_layout(
-            title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})',
-            xaxis_title='Date',
-            yaxis_title='Price',
-            legend_title='Legend',
-            height=600,
-            width=1000
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("MACD 分析（回測期間，基於預測價格）")
-        data_backtest = full_data.loc[period_start:period_end].copy()
-        data_backtest['EMA12_pred'] = pd.Series(predictions.flatten()[-len(test_dates):])[mask].ewm(span=12, adjust=False).mean()
-        data_backtest['EMA26_pred'] = pd.Series(predictions.flatten()[-len(test_dates):])[mask].ewm(span=26, adjust=False).mean()
-        data_backtest['MACD_pred'] = data_backtest['EMA12_pred'] - data_backtest['EMA26_pred']
-        data_backtest['Signal_pred'] = data_backtest['MACD_pred'].ewm(span=9, adjust=False).mean()
-
-        golden_cross = []
-        death_cross = []
-        for i in range(1, len(data_backtest)):
-            if data_backtest['MACD_pred'].iloc[i] > data_backtest['Signal_pred'].iloc[i] and data_backtest['MACD_pred'].iloc[i - 1] <= data_backtest['Signal_pred'].iloc[i - 1]:
-                golden_cross.append((data_backtest.index[i], data_backtest['MACD_pred'].iloc[i]))
-            elif data_backtest['MACD_pred'].iloc[i] < data_backtest['Signal_pred'].iloc[i] and data_backtest['MACD_pred'].iloc[i - 1] >= data_backtest['Signal_pred'].iloc[i - 1]:
-                death_cross.append((data_backtest.index[i], data_backtest['MACD_pred'].iloc[i]))
-
-        golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
-        death_x, death_y = zip(*death_cross) if death_cross else ([], [])
-
-        fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines', name='MACD Line (Predicted)'))
-        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines', name='Signal Line (Predicted)'))
-        fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
-        fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
-        fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
-        fig_macd.update_layout(
-            title=f'{stock_symbol} MACD Analysis (Based on Predicted Prices, {selected_period})',
-            xaxis_title='Date',
-            yaxis_title='MACD Value',
-            legend_title='Legend',
-            height=600,
-            width=1000
-        )
-        st.plotly_chart(fig_macd, use_container_width=True)
-
-        st.subheader("回測結果")
-        st.write(f"初始資金: $100,000")
-        st.write(f"最終資金: ${capital_values[-1]:.2f}")
-        st.write(f"總回報率: {total_return:.2f}%")
-        st.write(f"最大回報率: {max_return:.2f}%")
-        st.write(f"最小回報率: {min_return:.2f}%")
-        st.write(f"買入交易次數: {len(buy_signals)}")
-        st.write(f"賣出交易次數: {len(sell_signals)}")
-
-        st.subheader("模型評估指標")
-        mae = mean_absolute_error(filtered_y_test, filtered_predictions)
-        rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
-        r2 = r2_score(filtered_y_test, filtered_predictions)
-        mape = np.mean(np.abs((filtered_y_test - filtered_predictions) / filtered_y_test)) * 100
-
-        st.write(f"平均絕對誤差 (MAE): {mae:.4f}")
-        st.markdown("*MAE表示預測值與實際值的平均絕對差異，數值越小表示預測越準確*")
-        st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
-        st.markdown("*RMSE是預測誤差的平方根，對大誤差更敏感，數值越小表示模型表現越好*")
-        st.write(f"決定係數 (R²): {r2:.4f}")
-        st.markdown("*R²表示模型解釋數據變化的能力，範圍0-1，越接近1表示模型擬合越好*")
-        st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
-        st.markdown("*MAPE表示預測誤差的百分比，數值越小表示預測精度越高*")
-
-        st.subheader("運行時間")
-        st.write(f"總耗時: {elapsed_time:.2f} 秒")
-
-if __name__ == "__main__":
-    main()
+        filtered_y
