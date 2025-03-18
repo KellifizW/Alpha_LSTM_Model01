@@ -108,7 +108,7 @@ def predict_step(model, x):
     st.write(f"X_test shape before prediction: {x.shape}")
     return model(x, training=False)
 
-# 回測與交易策略
+# 回測與交易策略，新增金叉/死叉計算
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -134,6 +134,8 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     capital_values = []
     buy_signals = []
     sell_signals = []
+    golden_cross = []
+    death_cross = []
 
     test_dates = pd.to_datetime(test_dates)
     period_start = pd.to_datetime(period_start)
@@ -144,7 +146,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     if len(filtered_dates) == 0:
         st.error("回測時段不在測試數據範圍內！")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
     test_start_idx = data.index.get_loc(filtered_dates[0])
     test_end_idx = data.index.get_loc(filtered_dates[-1])
@@ -157,9 +159,13 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
         signal_pred = data['Signal_pred'].iloc[i]
         pred_price = data['Predicted'].iloc[i] if not pd.isna(data['Predicted'].iloc[i]) else close_price
 
-        # 調試訊息
-        if i == test_start_idx or i == test_end_idx:
-            st.write(f"日期: {data.index[i]}, MACD_pred: {macd_pred:.4f}, Signal_pred: {signal_pred:.4f}, Pred_price: {pred_price:.2f}, Close: {close_price:.2f}")
+        # 金叉與死叉計算
+        if i > test_start_idx:  # 確保有前一天數據
+            if pd.notna(macd_pred) and pd.notna(signal_pred):
+                if macd_pred > signal_pred and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
+                    golden_cross.append((data.index[i], macd_pred))
+                elif macd_pred < signal_pred and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
+                    death_cross.append((data.index[i], macd_pred))
 
         # 止損規則
         if position == 1 and pred_price < close_price * 0.98:
@@ -195,7 +201,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     max_return = (max(capital_values) / capital_values[0] - 1) * 100
     min_return = (min(capital_values) / capital_values[0] - 1) * 100
 
-    return capital_values, total_return, max_return, min_return, buy_signals, sell_signals
+    return capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
 # 主程式
 def main():
@@ -283,7 +289,7 @@ def main():
             result = backtest(full_data, predictions, test_dates, period_start, period_end)
             if result[0] is None:
                 return
-            capital_values, total_return, max_return, min_return, buy_signals, sell_signals = result
+            capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross = result
             progress_bar.progress(100)
             status_text.text("完成！正在生成結果...")
 
@@ -320,26 +326,7 @@ def main():
 
         st.subheader("MACD 分析（回測期間，基於預測價格）")
         data_backtest = full_data.loc[period_start:period_end].copy()
-        # 修正：確保預測數據與回測期間對齊
-        pred_series = pd.Series(predictions.flatten(), index=test_dates)[mask]
-        data_backtest['EMA12_pred'] = pred_series.reindex(data_backtest.index).ewm(span=12, adjust=False).mean()
-        data_backtest['EMA26_pred'] = pred_series.reindex(data_backtest.index).ewm(span=26, adjust=False).mean()
-        data_backtest['MACD_pred'] = data_backtest['EMA12_pred'] - data_backtest['EMA26_pred']
-        data_backtest['Signal_pred'] = data_backtest['MACD_pred'].ewm(span=9, adjust=False).mean()
-
-        # 調試：檢查是否有數據
-        st.write(f"MACD_pred 樣本: {data_backtest['MACD_pred'].head(5).tolist()}")
-        st.write(f"Signal_pred 樣本: {data_backtest['Signal_pred'].head(5).tolist()}")
-
-        golden_cross = []
-        death_cross = []
-        for i in range(1, len(data_backtest)):
-            if pd.notna(data_backtest['MACD_pred'].iloc[i]) and pd.notna(data_backtest['Signal_pred'].iloc[i]):
-                if data_backtest['MACD_pred'].iloc[i] > data_backtest['Signal_pred'].iloc[i] and data_backtest['MACD_pred'].iloc[i - 1] <= data_backtest['Signal_pred'].iloc[i - 1]:
-                    golden_cross.append((data_backtest.index[i], data_backtest['MACD_pred'].iloc[i]))
-                elif data_backtest['MACD_pred'].iloc[i] < data_backtest['Signal_pred'].iloc[i] and data_backtest['MACD_pred'].iloc[i - 1] >= data_backtest['Signal_pred'].iloc[i - 1]:
-                    death_cross.append((data_backtest.index[i], data_backtest['MACD_pred'].iloc[i]))
-
+        # 直接使用 backtest 計算的 MACD_pred 和 Signal_pred
         golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
         death_x, death_y = zip(*death_cross) if death_cross else ([], [])
 
