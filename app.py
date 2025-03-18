@@ -108,7 +108,7 @@ def predict_step(model, x):
     st.write(f"X_test shape before prediction: {x.shape}")
     return model(x, training=False)
 
-# 回測與交易策略，新增金叉/死叉計算
+# 回測與交易策略，新增返回完整數據框
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -146,7 +146,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     if len(filtered_dates) == 0:
         st.error("回測時段不在測試數據範圍內！")
-        return None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None
 
     test_start_idx = data.index.get_loc(filtered_dates[0])
     test_end_idx = data.index.get_loc(filtered_dates[-1])
@@ -201,7 +201,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     max_return = (max(capital_values) / capital_values[0] - 1) * 100
     min_return = (min(capital_values) / capital_values[0] - 1) * 100
 
-    return capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
+    return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
 # 主程式
 def main():
@@ -289,7 +289,7 @@ def main():
             result = backtest(full_data, predictions, test_dates, period_start, period_end)
             if result[0] is None:
                 return
-            capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross = result
+            full_data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross = result
             progress_bar.progress(100)
             status_text.text("完成！正在生成結果...")
 
@@ -325,8 +325,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("MACD 分析（回測期間，基於預測價格）")
-        data_backtest = full_data.loc[period_start:period_end].copy()
-        # 直接使用 backtest 計算的 MACD_pred 和 Signal_pred
+        data_backtest = full_data.loc[period_start:period_end].copy()  # 使用 backtest 返回的 full_data
         golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
         death_x, death_y = zip(*death_cross) if death_cross else ([], [])
 
