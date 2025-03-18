@@ -108,7 +108,7 @@ def predict_step(model, x):
     st.write(f"X_test shape before prediction: {x.shape}")
     return model(x, training=False)
 
-# 回測與交易策略，新增返回完整數據框
+# 回測與交易策略
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -159,12 +159,18 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
         signal_pred = data['Signal_pred'].iloc[i]
         pred_price = data['Predicted'].iloc[i] if not pd.isna(data['Predicted'].iloc[i]) else close_price
 
+        # 調試：檢查當前值
+        if i == test_start_idx or i == test_end_idx:
+            st.write(f"日期: {data.index[i]}, MACD_pred: {macd_pred:.4f}, Signal_pred: {signal_pred:.4f}")
+
         # 金叉與死叉計算
         if i > test_start_idx:  # 確保有前一天數據
             if pd.notna(macd_pred) and pd.notna(signal_pred):
-                if macd_pred > signal_pred and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
+                prev_macd = data['MACD_pred'].iloc[i - 1]
+                prev_signal = data['Signal_pred'].iloc[i - 1]
+                if macd_pred > signal_pred and prev_macd <= prev_signal:
                     golden_cross.append((data.index[i], macd_pred))
-                elif macd_pred < signal_pred and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
+                elif macd_pred < signal_pred and prev_macd >= prev_signal:
                     death_cross.append((data.index[i], macd_pred))
 
         # 止損規則
@@ -176,7 +182,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
             st.write(f"止損賣出: {data.index[i]}, 價格: {close_price:.2f}")
 
         # 買入信號
-        elif macd_pred > signal_pred and i > 0 and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
                 capital -= shares * close_price
@@ -185,7 +191,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                 st.write(f"買入: {data.index[i]}, 價格: {close_price:.2f}")
 
         # 賣出信號
-        elif macd_pred < signal_pred and i > 0 and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
             if position == 1:
                 capital += shares * close_price
                 position = 0
@@ -325,7 +331,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("MACD 分析（回測期間，基於預測價格）")
-        data_backtest = full_data.loc[period_start:period_end].copy()  # 使用 backtest 返回的 full_data
+        data_backtest = full_data.loc[period_start:period_end].copy()
         golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
         death_x, death_y = zip(*death_cross) if death_cross else ([], [])
 
