@@ -300,13 +300,13 @@ def main():
                 total_trading_days = len(data)
 
                 # 計算數據統計特性（修正）
-                daily_returns = data['Close'].pct_change().dropna()  # 確保是 Series
-                if isinstance(daily_returns, pd.Series) and len(daily_returns) > 1:  # 檢查是否為 Series 且數據足夠
+                daily_returns = data['Close'].pct_change().dropna()
+                if isinstance(daily_returns, pd.Series) and len(daily_returns) > 1:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
                     autocorrelation = daily_returns.autocorr()
                 else:
-                    volatility = mean_return = autocorrelation = "N/A"  # 如果數據不足，設為 N/A
+                    volatility = mean_return = autocorrelation = "N/A"
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
@@ -337,9 +337,11 @@ def main():
                 st.write(f"測試樣本數: {test_samples}")
                 st.write(f"訓練數據範圍: {train_date_range}")
                 st.write(f"測試數據範圍: {test_date_range}")
-                st.write(f"數據統計特性 - 日收益率均值: {mean_return if mean_return != 'N/A' else 'N/A':.6f}, "
-                         f"波動率: {volatility if volatility != 'N/A' else 'N/A':.6f}, "
-                         f"自相關係數: {autocorrelation if autocorrelation != 'N/A' else 'N/A':.6f}")
+                # 修正顯示格式，根據值類型動態處理
+                mean_display = f"{mean_return:.6f}" if isinstance(mean_return, (int, float)) else mean_return
+                volatility_display = f"{volatility:.6f}" if isinstance(volatility, (int, float)) else volatility
+                autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
+                st.write(f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
