@@ -13,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
-import pytz  # 新增 pytz 模組來處理時區
+import pytz
 import pickle
 import io
 import os
@@ -48,15 +48,15 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數（保持不變）
-def build_model(input_shape, model_type="original"):
+# 構建模型函數（修正為接受 learning_rate）
+def build_model(input_shape, model_type="original", learning_rate=0.001):
     if model_type == "lstm_simple":
         model = Sequential()
         model.add(LSTM(150, activation='relu', input_shape=input_shape, return_sequences=False))
         model.add(Dropout(0.01))
         model.add(Dense(32, activation='relu'))
         model.add(Dense(1))
-        model.compile(optimizer=Adam(learning_rate=0.001), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     else:
         inputs = Input(shape=input_shape)
         x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
@@ -65,7 +65,7 @@ def build_model(input_shape, model_type="original"):
         x = Attention()(x)
         outputs = Dense(1)(x)
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        model.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     return model
 
 # 數據預處理（保持不變）
