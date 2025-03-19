@@ -300,6 +300,7 @@ def main():
                 total_trading_days = len(data)
 
                 # 計算數據統計特性（修復）
+                st.write(f"調試信息 - data 列名: {data.columns.tolist()}")
                 if 'Close' not in data.columns:
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
@@ -308,7 +309,15 @@ def main():
                 if isinstance(daily_returns, pd.Series):
                     st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().tolist()}")
                 else:
-                    st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().to_string()}")
+                    st.write(f"調試信息 - daily_returns 列名: {daily_returns.columns.tolist()}")
+                    st.write(f"調試信息 - daily_returns 前5行: \n{daily_returns.head().to_string()}")
+                    # 如果是 DataFrame，選擇 'Close' 列
+                    if 'Close' in daily_returns.columns:
+                        daily_returns = daily_returns['Close']
+                        st.write(f"修正後 - daily_returns 類型: {type(daily_returns)}, 長度: {len(daily_returns)}, 前5行: {daily_returns.head().tolist()}")
+                    else:
+                        st.error("daily_returns 是 DataFrame，但缺少 'Close' 列，無法繼續計算。")
+                        return
                 try:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
