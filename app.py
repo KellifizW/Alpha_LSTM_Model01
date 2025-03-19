@@ -216,6 +216,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
+# 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
     st.write(f"當前 Streamlit 版本: {st.__version__}")
@@ -299,9 +300,15 @@ def main():
                 total_trading_days = len(data)
 
                 # 計算數據統計特性（修復）
+                if 'Close' not in data.columns:
+                    st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
+                    return
                 daily_returns = data['Close'].pct_change().dropna()
                 st.write(f"調試信息 - daily_returns 類型: {type(daily_returns)}, 長度: {len(daily_returns)}")
-                st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().to_list()}")
+                if isinstance(daily_returns, pd.Series):
+                    st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().tolist()}")
+                else:
+                    st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().to_string()}")
                 try:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
@@ -452,14 +459,14 @@ def main():
             selected_period = results['selected_period']
 
             st.subheader("下載訓練結果")
-            temp_model_path = "temp_model.keras"  # 改為 .keras
+            temp_model_path = "temp_model.keras"
             results['model'].save(temp_model_path)
             with open(temp_model_path, "rb") as f:
                 model_buffer = io.BytesIO(f.read())
             st.download_button(
                 label="下載訓練好的模型",
                 data=model_buffer,
-                file_name=f"{stock_symbol}_lstm_model.keras",  # 更新文件名
+                file_name=f"{stock_symbol}_lstm_model.keras",
                 mime="application/octet-stream"
             )
             os.remove(temp_model_path)
