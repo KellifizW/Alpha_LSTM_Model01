@@ -13,6 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
+import pytz  # 新增 pytz 模組來處理時區
 import pickle
 import io
 import os
@@ -237,13 +238,16 @@ def main():
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型", ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
 
-        current_date = datetime(2025, 3, 17)
-        start_date = current_date - timedelta(days=1095)
+        # 動態獲取當前美國東部時間
+        eastern = pytz.timezone('US/Eastern')
+        current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)  # 設置為當天0點
+        start_date = current_date - timedelta(days=1095)  # 過去3年 (約1095天)
         periods = []
         temp_end_date = current_date
 
+        # 生成回測時段選項（每段約180天）
         while temp_end_date >= start_date:
-            period_start = temp_end_date - timedelta(days=179)
+            period_start = temp_end_date - timedelta(days=179)  # 約6個月
             if period_start < start_date:
                 period_start = start_date
             periods.append(f"{period_start.strftime('%Y-%m-%d')} to {temp_end_date.strftime('%Y-%m-%d')}")
@@ -262,7 +266,7 @@ def main():
                 period_start_str, period_end_str = selected_period.split(" to ")
                 period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
                 period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
-                data_start = period_start - timedelta(days=1095)
+                data_start = period_start - timedelta(days=1095)  # 訓練數據從更早的時間開始
                 data_end = period_end + timedelta(days=1)
 
                 ticker = yf.Ticker(stock_symbol)
@@ -468,9 +472,10 @@ def main():
 
         stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL）", value="TSLA")
         timesteps = st.slider("選擇時間步長（需與訓練時一致）", min_value=10, max_value=100, value=30, step=10)
-        current_date = datetime(2025, 3, 18)  # 當前日期
-        default_start_date = current_date - timedelta(days=90)  # 預設為過去 90 天
-        default_end_date = current_date - timedelta(days=1)  # 預設為昨天
+        eastern = pytz.timezone('US/Eastern')
+        current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
+        default_start_date = current_date - timedelta(days=90)
+        default_end_date = current_date - timedelta(days=1)
         start_date = st.date_input("選擇歷史數據開始日期", value=default_start_date, max_value=current_date)
         end_date = st.date_input("選擇歷史數據結束日期", value=default_end_date, max_value=current_date)
         future_days = st.selectbox("選擇未來預測天數", [1, 5], index=0)  # 用戶選擇 1 天或 5 天
