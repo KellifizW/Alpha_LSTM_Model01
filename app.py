@@ -239,6 +239,18 @@ def main():
         timesteps = st.slider("選擇時間步長（歷史數據窗口天數）", min_value=10, max_value=100, value=30, step=10)
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型", ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
+        
+        # 添加學習率選擇滑動器
+        learning_rate_options = [1e-5, 1e-4, 5e-4, 1e-3, 5e-3]
+        learning_rate_index = st.slider(
+            "選擇 Adam 學習率",
+            min_value=0,
+            max_value=len(learning_rate_options) - 1,
+            value=3,  # 預設值為 1e-3 (0.001)，對應索引 3
+            format_func=lambda x: f"{learning_rate_options[x]:.5f}",
+            help="選擇 Adam 優化器的學習率，影響模型訓練速度和收斂性。"
+        )
+        selected_learning_rate = learning_rate_options[learning_rate_index]
 
         # 動態獲取當前美國東部時間
         eastern = pytz.timezone('US/Eastern')
@@ -296,7 +308,7 @@ def main():
                 progress_bar.progress(40)
                 status_text.text("步驟 3/5: 訓練模型...")
                 model_type_selected = "original" if model_type.startswith("original") else "lstm_simple"
-                model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected)
+                model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected, learning_rate=selected_learning_rate)
 
                 st.write("模型結構：")
                 model_summary = io.StringIO()
@@ -466,7 +478,7 @@ def main():
             st.write(f"MAPE: {results['mape']:.2f}%")
             st.write(f"總耗時: {results['elapsed_time']:.2f} 秒")
 
-    elif mode == "預測模式":  # 修正為英文引號，與 selectbox 一致
+    elif mode == "預測模式":
         st.markdown("""
         ### 預測模式
         上載保存的模型和縮放器，下載新數據並進行股價預測（包括未來 N 天）。
