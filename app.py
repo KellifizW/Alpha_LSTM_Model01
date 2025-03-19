@@ -220,6 +220,9 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 def main():
     st.title("股票價格預測與回測系統 BETA")
 
+    # 顯示 Streamlit 版本
+    st.write(f"當前 Streamlit 版本: {st.__version__}")
+
     # 初始化 session_state
     if 'results' not in st.session_state:
         st.session_state['results'] = None
@@ -240,17 +243,15 @@ def main():
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型", ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
         
-        # 添加學習率選擇滑動器
+        # 添加學習率選擇下拉選單
         learning_rate_options = [1e-5, 1e-4, 5e-4, 1e-3, 5e-3]
-        learning_rate_index = st.slider(
+        selected_learning_rate = st.selectbox(
             "選擇 Adam 學習率",
-            min_value=0,
-            max_value=len(learning_rate_options) - 1,
-            value=3,  # 預設值為 1e-3 (0.001)，對應索引 3
-            format_func=lambda x: f"{learning_rate_options[x]:.5f}",
+            options=learning_rate_options,
+            index=3,  # 預設值為 1e-3 (0.001)，對應索引 3
+            format_func=lambda x: f"{x:.5f}",  # 格式化顯示
             help="選擇 Adam 優化器的學習率，影響模型訓練速度和收斂性。"
         )
-        selected_learning_rate = learning_rate_options[learning_rate_index]
 
         # 動態獲取當前美國東部時間
         eastern = pytz.timezone('US/Eastern')
