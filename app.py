@@ -42,7 +42,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數
+# 構建模型函數（修復損失函數）
 def build_model(input_shape, model_type="original"):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -50,7 +50,7 @@ def build_model(input_shape, model_type="original"):
         model.add(Dropout(0.01))
         model.add(Dense(32, activation='relu'))
         model.add(Dense(1))
-        model.compile(optimizer=Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=0.001), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     else:
         inputs = Input(shape=input_shape)
         x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
@@ -59,7 +59,7 @@ def build_model(input_shape, model_type="original"):
         x = Attention()(x)
         outputs = Dense(1)(x)
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+        model.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     return model
 
 # 數據預處理（支援訓練和預測）
@@ -469,7 +469,9 @@ def main():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".h5") as tmp_model:
                     tmp_model.write(model_file.read())
                     tmp_model_path = tmp_model.name
-                model = load_model(tmp_model_path, custom_objects={"Attention": Attention})
+                # 明確指定 mse 損失函數
+                custom_objects = {"Attention": Attention, "mse": tf.keras.losses.mean_squared_error}
+                model = load_model(tmp_model_path, custom_objects=custom_objects)
                 os.unlink(tmp_model_path)  # 刪除臨時檔案
 
                 # 載入縮放器（直接從文件流讀取）
