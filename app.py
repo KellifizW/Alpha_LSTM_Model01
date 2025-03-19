@@ -13,6 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
+import pickle  # 用於保存縮放器
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -101,7 +102,7 @@ def preprocess_data(data, timesteps):
     st.write(f"訓練數據範圍：{data_index[0]} 至 {data_index[train_size + timesteps - 1]}")
     st.write(f"測試數據範圍：{data_index[train_size + timesteps]} 至 {data_index[-1]}")
 
-    return X_train, X_test, y_train, y_test, scaler_target, test_dates, data
+    return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, data
 
 # 預測函數
 @tf.function(reduce_retracing=True)
@@ -116,13 +117,11 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     data['Predicted'] = np.nan
     data.iloc[-test_size:, data.columns.get_loc('Predicted')] = predictions.flatten()
 
-    # 原有MACD
     data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
     data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
     data['MACD'] = data['EMA12'] - data['EMA26']
     data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
-    # 預測MACD
     test_mask = data.index.isin(test_dates)
     data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12, adjust=False).mean()
     data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26, adjust=False).mean()
@@ -272,18 +271,40 @@ def main():
 
             progress_bar.progress(20)
             status_text.text("步驟 2/5: 預處理數據...")
-            X_train, X_test, y_train, y_test, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
-            
+            X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
+
+            # 保存特徵和目標縮放器
+            with open("scaler_features.pkl", "wb") as f:
+                pickle.dump(scaler_features, f)
+            with open("scaler_target.pkl", "wb") as f:
+                pickle.dump(scaler_target, f)
+            st.write("特徵縮放器已保存為 'scaler_features.pkl'")
+            st.write("目標縮放器已保存為 'scaler_target.pkl'")
+
+            # 提供縮放器下載按鈕
+            with open("scaler_features.pkl", "rb") as f:
+                st.download_button(
+                    label="下載特徵縮放器",
+                    data=f,
+                    file_name=f"{stock_symbol}_scaler_features.pkl",
+                    mime="application/octet-stream"
+                )
+            with open("scaler_target.pkl", "rb") as f:
+                st.download_button(
+                    label="下載目標縮放器",
+                    data=f,
+                    file_name=f"{stock_symbol}_scaler_target.pkl",
+                    mime="application/octet-stream"
+                )
+
             progress_bar.progress(40)
             status_text.text("步驟 3/5: 訓練模型（這可能需要幾分鐘）...")
             model_type_selected = "original" if model_type.startswith("original") else "lstm_simple"
             model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected)
 
-            # 打印模型結構
             st.write("模型結構：")
             model.summary(print_fn=lambda x: st.write(x))
 
-            # 添加進度回調
             progress_per_epoch = 20 / epochs
             if 'training_progress' not in st.session_state:
                 st.session_state['training_progress'] = 40
@@ -295,13 +316,24 @@ def main():
 
             epoch_callback = LambdaCallback(on_epoch_end=update_progress)
 
-            # 訓練並檢查損失
             history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[epoch_callback])
             st.write("訓練完成！")
             st.write(f"最終訓練損失: {history.history['loss'][-1]:.4f}")
             st.write(f"最終驗證損失: {history.history['val_loss'][-1]:.4f}")
 
-            # 繪製損失曲線
+            # 保存模型
+            model.save("lstm_model.h5")
+            st.write("模型已保存為 'lstm_model.h5'")
+
+            # 提供模型下載按鈕
+            with open("lstm_model.h5", "rb") as file:
+                st.download_button(
+                    label="下載訓練好的模型",
+                    data=file,
+                    file_name=f"{stock_symbol}_lstm_model.h5",
+                    mime="application/octet-stream"
+                )
+
             fig_loss = go.Figure()
             fig_loss.add_trace(go.Scatter(y=history.history['loss'], mode='lines', name='Training Loss'))
             fig_loss.add_trace(go.Scatter(y=history.history['val_loss'], mode='lines', name='Validation Loss'))
@@ -313,8 +345,6 @@ def main():
             predictions = predict_step(model, X_test)
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
-
-            # 檢查預測結果
             st.write(f"預測結果樣本（前5個）：{predictions[:5].flatten()}")
             if np.any(np.isnan(predictions)) or np.any(np.isinf(predictions)):
                 st.error("預測結果中包含無效值（NaN或Inf），模型訓練可能有問題！")
