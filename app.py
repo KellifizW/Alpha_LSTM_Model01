@@ -14,7 +14,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
 import pickle
-import io  # 用於在記憶體中處理文件，避免直接寫入硬碟
+import io
+import os  # 用於管理臨時檔案
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -412,18 +413,23 @@ def main():
         stock_symbol = results['stock_symbol']
         selected_period = results['selected_period']
 
-        # 顯示下載按鈕（在記憶體中生成文件）
+        # 顯示下載按鈕（先保存到臨時檔案，再讀取到記憶體）
         st.subheader("下載訓練結果")
-        model_buffer = io.BytesIO()
-        results['model'].save(model_buffer)
-        model_buffer.seek(0)
+        
+        # 保存模型到臨時檔案並提供下載
+        temp_model_path = "temp_model.h5"
+        results['model'].save(temp_model_path)
+        with open(temp_model_path, "rb") as f:
+            model_buffer = io.BytesIO(f.read())
         st.download_button(
             label="下載訓練好的模型",
             data=model_buffer,
             file_name=f"{stock_symbol}_lstm_model.h5",
             mime="application/octet-stream"
         )
+        os.remove(temp_model_path)  # 刪除臨時檔案
 
+        # 保存特徵縮放器到記憶體並提供下載
         scaler_features_buffer = io.BytesIO()
         pickle.dump(results['scaler_features'], scaler_features_buffer)
         scaler_features_buffer.seek(0)
@@ -434,6 +440,7 @@ def main():
             mime="application/octet-stream"
         )
 
+        # 保存目標縮放器到記憶體並提供下載
         scaler_target_buffer = io.BytesIO()
         pickle.dump(results['scaler_target'], scaler_target_buffer)
         scaler_target_buffer.seek(0)
