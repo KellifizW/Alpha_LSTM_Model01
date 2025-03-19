@@ -13,7 +13,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import time
 from datetime import datetime, timedelta
-import pickle  # 用於保存縮放器
+import pickle
+import io  # 用於在記憶體中處理文件，避免直接寫入硬碟
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -208,6 +209,13 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 def main():
     st.title("股票價格預測與回測系統 BETA")
 
+    # 初始化 session_state
+    if 'results' not in st.session_state:
+        st.session_state['results'] = None
+    if 'training_progress' not in st.session_state:
+        st.session_state['training_progress'] = 40
+
+    # 顯示初始界面
     st.markdown("""
     ### 功能與限制
     本程式使用深度學習模型預測股票價格，並基於MACD策略進行模擬交易回測。
@@ -240,7 +248,8 @@ def main():
 
     selected_period = st.selectbox("選擇回測時段（6個月，最近 3 年）", periods[::-1])
 
-    if st.button("運行分析"):
+    # 運行分析按鈕
+    if st.button("運行分析") and st.session_state['results'] is None:
         start_time = time.time()
 
         with st.spinner("正在下載數據並訓練模型，請等待..."):
@@ -273,42 +282,17 @@ def main():
             status_text.text("步驟 2/5: 預處理數據...")
             X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(data, timesteps)
 
-            # 保存特徵和目標縮放器
-            with open("scaler_features.pkl", "wb") as f:
-                pickle.dump(scaler_features, f)
-            with open("scaler_target.pkl", "wb") as f:
-                pickle.dump(scaler_target, f)
-            st.write("特徵縮放器已保存為 'scaler_features.pkl'")
-            st.write("目標縮放器已保存為 'scaler_target.pkl'")
-
-            # 提供縮放器下載按鈕
-            with open("scaler_features.pkl", "rb") as f:
-                st.download_button(
-                    label="下載特徵縮放器",
-                    data=f,
-                    file_name=f"{stock_symbol}_scaler_features.pkl",
-                    mime="application/octet-stream"
-                )
-            with open("scaler_target.pkl", "rb") as f:
-                st.download_button(
-                    label="下載目標縮放器",
-                    data=f,
-                    file_name=f"{stock_symbol}_scaler_target.pkl",
-                    mime="application/octet-stream"
-                )
-
             progress_bar.progress(40)
             status_text.text("步驟 3/5: 訓練模型（這可能需要幾分鐘）...")
             model_type_selected = "original" if model_type.startswith("original") else "lstm_simple"
             model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected)
 
             st.write("模型結構：")
-            model.summary(print_fn=lambda x: st.write(x))
+            model_summary = io.StringIO()
+            model.summary(print_fn=lambda x: model_summary.write(x + '\n'))
+            st.text(model_summary.getvalue())
 
             progress_per_epoch = 20 / epochs
-            if 'training_progress' not in st.session_state:
-                st.session_state['training_progress'] = 40
-
             def update_progress(epoch, logs):
                 st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
                 progress_bar.progress(int(st.session_state['training_progress']))
@@ -321,24 +305,10 @@ def main():
             st.write(f"最終訓練損失: {history.history['loss'][-1]:.4f}")
             st.write(f"最終驗證損失: {history.history['val_loss'][-1]:.4f}")
 
-            # 保存模型
-            model.save("lstm_model.h5")
-            st.write("模型已保存為 'lstm_model.h5'")
-
-            # 提供模型下載按鈕
-            with open("lstm_model.h5", "rb") as file:
-                st.download_button(
-                    label="下載訓練好的模型",
-                    data=file,
-                    file_name=f"{stock_symbol}_lstm_model.h5",
-                    mime="application/octet-stream"
-                )
-
             fig_loss = go.Figure()
             fig_loss.add_trace(go.Scatter(y=history.history['loss'], mode='lines', name='Training Loss'))
             fig_loss.add_trace(go.Scatter(y=history.history['val_loss'], mode='lines', name='Validation Loss'))
             fig_loss.update_layout(title='訓練與驗證損失曲線', xaxis_title='Epoch', yaxis_title='Loss')
-            st.plotly_chart(fig_loss)
 
             progress_bar.progress(60)
             status_text.text("步驟 4/5: 進行價格預測...")
@@ -358,84 +328,159 @@ def main():
             progress_bar.progress(100)
             status_text.text("完成！正在生成結果...")
 
-        end_time = time.time()
-        elapsed_time = end_time - start_time
+            end_time = time.time()
+            elapsed_time = end_time - start_time
 
-        test_dates = pd.to_datetime(test_dates)
-        period_start = pd.to_datetime(period_start)
-        period_end = pd.to_datetime(period_end)
-        mask = (test_dates >= period_start) & (test_dates <= period_end)
-        filtered_dates = test_dates[mask]
-        filtered_y_test = y_test[mask]
-        filtered_predictions = predictions[mask]
+            test_dates = pd.to_datetime(test_dates)
+            period_start = pd.to_datetime(period_start)
+            period_end = pd.to_datetime(period_end)
+            mask = (test_dates >= period_start) & (test_dates <= period_end)
+            filtered_dates = test_dates[mask]
+            filtered_y_test = y_test[mask]
+            filtered_predictions = predictions[mask]
 
-        st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
-        fig.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
-        buy_signals = [(d, p) for d, p in buy_signals if period_start <= d <= period_end]
-        sell_signals = [(d, p) for d, p in sell_signals if period_start <= d <= period_end]
-        buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
-        sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
-        fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
-        fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
-        fig.update_layout(
-            title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})',
-            xaxis_title='Date',
-            yaxis_title='Price',
-            legend_title='Legend',
-            height=600,
-            width=1000
+            # 生成價格圖表
+            fig_price = go.Figure()
+            fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
+            fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
+            buy_signals = [(d, p) for d, p in buy_signals if period_start <= d <= period_end]
+            sell_signals = [(d, p) for d, p in sell_signals if period_start <= d <= period_end]
+            buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
+            sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
+            fig_price.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
+            fig_price.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
+            fig_price.update_layout(
+                title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})',
+                xaxis_title='Date',
+                yaxis_title='Price',
+                legend_title='Legend',
+                height=600,
+                width=1000
+            )
+
+            # 生成MACD圖表
+            data_backtest = full_data.loc[period_start:period_end].copy()
+            golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
+            death_x, death_y = zip(*death_cross) if death_cross else ([], [])
+            fig_macd = go.Figure()
+            fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines', name='MACD Line (Predicted)'))
+            fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines', name='Signal Line (Predicted)'))
+            fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
+            fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
+            fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
+            fig_macd.update_layout(
+                title=f'{stock_symbol} MACD Analysis (Based on Predicted Prices, {selected_period})',
+                xaxis_title='Date',
+                yaxis_title='MACD Value',
+                legend_title='Legend',
+                height=600,
+                width=1000
+            )
+
+            # 計算評估指標
+            mae = mean_absolute_error(filtered_y_test, filtered_predictions)
+            rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
+            r2 = r2_score(filtered_y_test, filtered_predictions)
+            mape = np.mean(np.abs((filtered_y_test - filtered_predictions) / filtered_y_test)) * 100
+
+            # 將結果儲存到 session_state
+            st.session_state['results'] = {
+                'model': model,
+                'scaler_features': scaler_features,
+                'scaler_target': scaler_target,
+                'fig_price': fig_price,
+                'fig_loss': fig_loss,
+                'fig_macd': fig_macd,
+                'capital_values': capital_values,
+                'total_return': total_return,
+                'max_return': max_return,
+                'min_return': min_return,
+                'buy_signals': buy_signals,
+                'sell_signals': sell_signals,
+                'mae': mae,
+                'rmse': rmse,
+                'r2': r2,
+                'mape': mape,
+                'elapsed_time': elapsed_time,
+                'stock_symbol': stock_symbol,
+                'selected_period': selected_period
+            }
+
+    # 顯示已有結果（如果存在）
+    if st.session_state['results'] is not None:
+        results = st.session_state['results']
+        stock_symbol = results['stock_symbol']
+        selected_period = results['selected_period']
+
+        # 顯示下載按鈕（在記憶體中生成文件）
+        st.subheader("下載訓練結果")
+        model_buffer = io.BytesIO()
+        results['model'].save(model_buffer)
+        model_buffer.seek(0)
+        st.download_button(
+            label="下載訓練好的模型",
+            data=model_buffer,
+            file_name=f"{stock_symbol}_lstm_model.h5",
+            mime="application/octet-stream"
         )
-        st.plotly_chart(fig, use_container_width=True)
+
+        scaler_features_buffer = io.BytesIO()
+        pickle.dump(results['scaler_features'], scaler_features_buffer)
+        scaler_features_buffer.seek(0)
+        st.download_button(
+            label="下載特徵縮放器",
+            data=scaler_features_buffer,
+            file_name=f"{stock_symbol}_scaler_features.pkl",
+            mime="application/octet-stream"
+        )
+
+        scaler_target_buffer = io.BytesIO()
+        pickle.dump(results['scaler_target'], scaler_target_buffer)
+        scaler_target_buffer.seek(0)
+        st.download_button(
+            label="下載目標縮放器",
+            data=scaler_target_buffer,
+            file_name=f"{stock_symbol}_scaler_target.pkl",
+            mime="application/octet-stream"
+        )
+
+        # 顯示分析結果
+        st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
+        st.plotly_chart(results['fig_price'], use_container_width=True)
+
+        st.subheader("訓練與驗證損失曲線")
+        st.plotly_chart(results['fig_loss'], use_container_width=True)
 
         st.subheader("MACD 分析（回測期間，基於預測價格）")
-        data_backtest = full_data.loc[period_start:period_end].copy()
-        golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
-        death_x, death_y = zip(*death_cross) if death_cross else ([], [])
-
-        fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines', name='MACD Line (Predicted)'))
-        fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines', name='Signal Line (Predicted)'))
-        fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
-        fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
-        fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
-        fig_macd.update_layout(
-            title=f'{stock_symbol} MACD Analysis (Based on Predicted Prices, {selected_period})',
-            xaxis_title='Date',
-            yaxis_title='MACD Value',
-            legend_title='Legend',
-            height=600,
-            width=1000
-        )
-        st.plotly_chart(fig_macd, use_container_width=True)
+        st.plotly_chart(results['fig_macd'], use_container_width=True)
 
         st.subheader("回測結果")
         st.write(f"初始資金: $100,000")
-        st.write(f"最終資金: ${capital_values[-1]:.2f}")
-        st.write(f"總回報率: {total_return:.2f}%")
-        st.write(f"最大回報率: {max_return:.2f}%")
-        st.write(f"最小回報率: {min_return:.2f}%")
-        st.write(f"買入交易次數: {len(buy_signals)}")
-        st.write(f"賣出交易次數: {len(sell_signals)}")
+        st.write(f"最終資金: ${results['capital_values'][-1]:.2f}")
+        st.write(f"總回報率: {results['total_return']:.2f}%")
+        st.write(f"最大回報率: {results['max_return']:.2f}%")
+        st.write(f"最小回報率: {results['min_return']:.2f}%")
+        st.write(f"買入交易次數: {len(results['buy_signals'])}")
+        st.write(f"賣出交易次數: {len(results['sell_signals'])}")
 
         st.subheader("模型評估指標")
-        mae = mean_absolute_error(filtered_y_test, filtered_predictions)
-        rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
-        r2 = r2_score(filtered_y_test, filtered_predictions)
-        mape = np.mean(np.abs((filtered_y_test - filtered_predictions) / filtered_y_test)) * 100
-
-        st.write(f"平均絕對誤差 (MAE): {mae:.4f}")
+        st.write(f"平均絕對誤差 (MAE): {results['mae']:.4f}")
         st.markdown("*MAE表示預測值與實際值的平均絕對差異，數值越小表示預測越準確*")
-        st.write(f"均方根誤差 (RMSE): {rmse:.4f}")
+        st.write(f"均方根誤差 (RMSE): {results['rmse']:.4f}")
         st.markdown("*RMSE是預測誤差的平方根，對大誤差更敏感，數值越小表示模型表現越好*")
-        st.write(f"決定係數 (R²): {r2:.4f}")
+        st.write(f"決定係數 (R²): {results['r2']:.4f}")
         st.markdown("*R²表示模型解釋數據變化的能力，範圍0-1，越接近1表示模型擬合越好*")
-        st.write(f"平均絕對百分比誤差 (MAPE): {mape:.2f}%")
+        st.write(f"平均絕對百分比誤差 (MAPE): {results['mape']:.2f}%")
         st.markdown("*MAPE表示預測誤差的百分比，數值越小表示預測精度越高*")
 
         st.subheader("運行時間")
-        st.write(f"總耗時: {elapsed_time:.2f} 秒")
+        st.write(f"總耗時: {results['elapsed_time']:.2f} 秒")
+
+    # 手動還原按鈕
+    if st.button("還原狀態"):
+        st.session_state['results'] = None
+        st.session_state['training_progress'] = 40
+        st.experimental_rerun()  # 強制重新運行以刷新頁面
 
 if __name__ == "__main__":
     main()
