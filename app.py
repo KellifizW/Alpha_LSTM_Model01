@@ -18,6 +18,9 @@ import io
 import os
 import tempfile
 
+# 顯示 TensorFlow 版本
+st.write(f"當前 TensorFlow 版本: {tf.__version__}")
+
 # 自訂 Attention 層
 class Attention(Layer):
     def __init__(self, **kwargs):
@@ -42,7 +45,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數（修復損失函數）
+# 構建模型函數（使用 MeanSquaredError 類）
 def build_model(input_shape, model_type="original"):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -204,8 +207,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 # 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
-    # 顯示 TensorFlow 版本
-    st.write(f"當前 TensorFlow 版本: {tf.__version__}")
 
     # 初始化 session_state
     if 'results' not in st.session_state:
@@ -269,7 +270,7 @@ def main():
                 status_text.text("步驟 1/5: 下載數據...")
                 data = yf.download(stock_symbol, start=data_start, end=data_end)
 
-                if data.empty:
+                ifdependencesif data.empty:
                     st.error("無法獲取此代碼的數據。請檢查股票代碼或時段！")
                     return
 
@@ -471,8 +472,13 @@ def main():
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".h5") as tmp_model:
                     tmp_model.write(model_file.read())
                     tmp_model_path = tmp_model.name
-                # 明確指定 mse 損失函數
-                custom_objects = {"Attention": Attention, "mse": tf.keras.losses.mean_squared_error}
+                
+                # 兼容 TensorFlow 2.19 和舊模型的損失函數
+                custom_objects = {
+                    "Attention": Attention,
+                    "mse": tf.keras.losses.MeanSquaredError(),  # 舊模型的 'mse' 映射
+                    "MeanSquaredError": tf.keras.losses.MeanSquaredError  # 新模型的類名
+                }
                 model = load_model(tmp_model_path, custom_objects=custom_objects)
                 os.unlink(tmp_model_path)  # 刪除臨時檔案
 
