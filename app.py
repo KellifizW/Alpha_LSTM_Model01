@@ -299,14 +299,16 @@ def main():
                 actual_end_date = data.index[-1].strftime('%Y-%m-%d')
                 total_trading_days = len(data)
 
-                # 計算數據統計特性（修正）
+                # 計算數據統計特性（修復並添加調試）
                 daily_returns = data['Close'].pct_change().dropna()
+                st.write(f"調試信息 - daily_returns 類型: {type(daily_returns)}, 長度: {len(daily_returns)}")  # 調試輸出
                 if isinstance(daily_returns, pd.Series) and len(daily_returns) > 1:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
                     autocorrelation = daily_returns.autocorr()
                 else:
                     volatility = mean_return = autocorrelation = "N/A"
+                    st.warning(f"警告：無法計算統計特性，daily_returns 數據異常（長度: {len(daily_returns)}）")
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
@@ -337,7 +339,6 @@ def main():
                 st.write(f"測試樣本數: {test_samples}")
                 st.write(f"訓練數據範圍: {train_date_range}")
                 st.write(f"測試數據範圍: {test_date_range}")
-                # 修正顯示格式，根據值類型動態處理
                 mean_display = f"{mean_return:.6f}" if isinstance(mean_return, (int, float)) else mean_return
                 volatility_display = f"{volatility:.6f}" if isinstance(volatility, (int, float)) else volatility
                 autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
