@@ -299,11 +299,14 @@ def main():
                 actual_end_date = data.index[-1].strftime('%Y-%m-%d')
                 total_trading_days = len(data)
 
-                # 計算數據統計特性
-                daily_returns = data['Close'].pct_change().dropna()
-                volatility = daily_returns.std()
-                mean_return = daily_returns.mean()
-                autocorrelation = daily_returns.autocorr()
+                # 計算數據統計特性（修正）
+                daily_returns = data['Close'].pct_change().dropna()  # 確保是 Series
+                if isinstance(daily_returns, pd.Series) and len(daily_returns) > 1:  # 檢查是否為 Series 且數據足夠
+                    volatility = daily_returns.std()
+                    mean_return = daily_returns.mean()
+                    autocorrelation = daily_returns.autocorr()
+                else:
+                    volatility = mean_return = autocorrelation = "N/A"  # 如果數據不足，設為 N/A
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
@@ -334,7 +337,9 @@ def main():
                 st.write(f"測試樣本數: {test_samples}")
                 st.write(f"訓練數據範圍: {train_date_range}")
                 st.write(f"測試數據範圍: {test_date_range}")
-                st.write(f"數據統計特性 - 日收益率均值: {mean_return:.6f}, 波動率: {volatility:.6f}, 自相關係數: {autocorrelation:.6f}")
+                st.write(f"數據統計特性 - 日收益率均值: {mean_return if mean_return != 'N/A' else 'N/A':.6f}, "
+                         f"波動率: {volatility if volatility != 'N/A' else 'N/A':.6f}, "
+                         f"自相關係數: {autocorrelation if autocorrelation != 'N/A' else 'N/A':.6f}")
 
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
@@ -435,7 +440,7 @@ def main():
                     'elapsed_time': elapsed_time,
                     'stock_symbol': stock_symbol,
                     'selected_period': selected_period,
-                    'history': history.history  # 保存訓練歷史
+                    'history': history.history
                 }
 
         if st.session_state['results'] is not None:
