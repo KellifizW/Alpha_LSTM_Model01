@@ -21,7 +21,7 @@ import tempfile
 # 顯示 TensorFlow 版本
 st.write(f"當前 TensorFlow 版本: {tf.__version__}")
 
-# 自訂 Attention 層
+# 自訂 Attention 層（保持不變）
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -45,7 +45,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數
+# 構建模型函數（保持不變）
 def build_model(input_shape, model_type="original"):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -65,7 +65,7 @@ def build_model(input_shape, model_type="original"):
         model.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     return model
 
-# 數據預處理（添加空數據檢查）
+# 數據預處理（保持不變）
 def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, is_training=True):
     if data.empty:
         raise ValueError("輸入數據為空，無法進行預處理。請檢查數據來源或日期範圍。")
@@ -463,24 +463,24 @@ def main():
     elif mode == "預測模式":
         st.markdown("""
         ### 預測模式
-        上載保存的模型和縮放器，下載新數據並進行股價預測。
+        上載保存的模型和縮放器，下載新數據並進行股價預測（包括未來 N 天）。
         """)
 
         stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL）", value="TSLA")
         timesteps = st.slider("選擇時間步長（需與訓練時一致）", min_value=10, max_value=100, value=30, step=10)
-        # 調整預設日期範圍，避免未來日期
         current_date = datetime(2025, 3, 18)  # 當前日期
         default_start_date = current_date - timedelta(days=90)  # 預設為過去 90 天
         default_end_date = current_date - timedelta(days=1)  # 預設為昨天
-        start_date = st.date_input("選擇新數據開始日期", value=default_start_date, max_value=current_date)
-        end_date = st.date_input("選擇新數據結束日期", value=default_end_date, max_value=current_date)
+        start_date = st.date_input("選擇歷史數據開始日期", value=default_start_date, max_value=current_date)
+        end_date = st.date_input("選擇歷史數據結束日期", value=default_end_date, max_value=current_date)
+        future_days = st.selectbox("選擇未來預測天數", [1, 5], index=0)  # 用戶選擇 1 天或 5 天
 
         model_file = st.file_uploader("上載模型文件 (.h5)", type=["h5"])
         scaler_features_file = st.file_uploader("上載特徵縮放器 (.pkl)", type=["pkl"])
         scaler_target_file = st.file_uploader("上載目標縮放器 (.pkl)", type=["pkl"])
 
         if st.button("運行預測") and model_file and scaler_features_file and scaler_target_file:
-            with st.spinner("正在載入模型並預測..."):
+            with st.spinner("正在載入模型並預測（包括未來預測）..."):
                 # 載入模型
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".h5") as tmp_model:
                     tmp_model.write(model_file.read())
@@ -498,30 +498,57 @@ def main():
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
-                # 下載新數據並檢查
+                # 下載歷史數據
                 data = yf.download(stock_symbol, start=start_date, end=end_date)
                 if data.empty:
                     st.error(f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
                     return
 
-                # 預處理新數據
+                # 預處理歷史數據
                 try:
                     X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features, scaler_target, is_training=False)
                 except ValueError as e:
                     st.error(str(e))
                     return
 
-                # 進行預測
-                predictions = predict_step(model, X_new)
-                predictions = scaler_target.inverse_transform(predictions)
+                # 預測歷史數據
+                historical_predictions = predict_step(model, X_new)
+                historical_predictions = scaler_target.inverse_transform(historical_predictions)
                 y_new = scaler_target.inverse_transform(y_new)
+
+                # 未來預測
+                future_predictions = []
+                last_sequence = X_new[-1]  # 最後一個歷史序列
+                last_data = full_data.iloc[-1]  # 最後一天的數據
+                for _ in range(future_days):
+                    pred = predict_step(model, last_sequence[np.newaxis, :])
+                    pred_price = scaler_target.inverse_transform(pred)[0, 0]
+                    future_predictions.append(pred_price)
+                    # 更新序列：假設未來 Open, High, Low 使用最後一天的值，Close 使用預測值
+                    new_features = [
+                        last_data['Close'],  # Yesterday_Close 使用前一天的 Close
+                        last_data['Open'],   # 假設未來 Open 與最後一天相同
+                        last_data['High'],   # 假設未來 High 與最後一天相同
+                        last_data['Low'],    # 假設未來 Low 與最後一天相同
+                        pred_price           # Average 使用預測的 Close
+                    ]
+                    scaled_new_features = scaler_features.transform([new_features])[0]
+                    last_sequence = np.roll(last_sequence, -1, axis=0)
+                    last_sequence[-1] = scaled_new_features
+                    last_data['Close'] = pred_price  # 更新下一輪的 Yesterday_Close
+
+                # 合併歷史和未來數據
+                future_dates = pd.date_range(start=end_date + timedelta(days=1), periods=future_days)
+                all_dates = np.concatenate([new_dates, future_dates])
+                all_predictions = np.concatenate([historical_predictions.flatten(), future_predictions])
 
                 # 顯示結果
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=new_dates, y=y_new.flatten(), mode='lines', name='Actual Price'))
-                fig.add_trace(go.Scatter(x=new_dates, y=predictions.flatten(), mode='lines', name='Predicted Price'))
+                fig.add_trace(go.Scatter(x=all_dates, y=all_predictions, mode='lines', name='Predicted Price'))
+                fig.add_vline(x=end_date, line_dash="dash", line_color="red", name="Prediction Start")
                 fig.update_layout(
-                    title=f'{stock_symbol} 預測結果 ({start_date} to {end_date})',
+                    title=f'{stock_symbol} 預測結果 ({start_date} 至 {end_date} + 未來 {future_days} 天)',
                     xaxis_title='Date',
                     yaxis_title='Price',
                     height=600,
@@ -529,17 +556,21 @@ def main():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 顯示評估指標
+                # 顯示歷史數據的評估指標
                 if len(y_new) > 0:
-                    mae = mean_absolute_error(y_new, predictions)
-                    rmse = np.sqrt(mean_squared_error(y_new, predictions))
-                    r2 = r2_score(y_new, predictions)
-                    mape = np.mean(np.abs((y_new - predictions) / y_new)) * 100
-                    st.subheader("預測評估指標")
+                    mae = mean_absolute_error(y_new, historical_predictions)
+                    rmse = np.sqrt(mean_squared_error(y_new, historical_predictions))
+                    r2 = r2_score(y_new, historical_predictions)
+                    mape = np.mean(np.abs((y_new - historical_predictions) / y_new)) * 100
+                    st.subheader("歷史數據預測評估指標")
                     st.write(f"MAE: {mae:.4f}")
                     st.write(f"RMSE: {rmse:.4f}")
                     st.write(f"R²: {r2:.4f}")
                     st.write(f"MAPE: {mape:.2f}%")
+                
+                st.subheader("未來預測價格")
+                for i, (date, price) in enumerate(zip(future_dates, future_predictions)):
+                    st.write(f"日期: {date.strftime('%Y-%m-%d')}，預測價格: {price:.2f}")
 
     # 還原狀態
     if st.button("還原狀態"):
