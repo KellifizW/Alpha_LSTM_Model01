@@ -6,4 +6,3 @@ tensorflow
 matplotlib
 scikit-learn
 plotly
-pickle
