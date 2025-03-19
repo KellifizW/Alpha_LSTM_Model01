@@ -19,8 +19,10 @@ import io
 import os
 import tempfile
 
-# 顯示 TensorFlow 版本
-st.write(f"當前 TensorFlow 版本: {tf.__version__}")
+# 顯示 TensorFlow 版本並加上當日美國時間
+eastern = pytz.timezone('US/Eastern')
+current_date = datetime.now(eastern)
+st.write(f"當前 TensorFlow 版本: {tf.__version__}，今日美國東部時間: {current_date.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
 # 自訂 Attention 層（保持不變）
 class Attention(Layer):
