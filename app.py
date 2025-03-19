@@ -204,6 +204,8 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 # 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
+    # 顯示 TensorFlow 版本
+    st.write(f"當前 TensorFlow 版本: {tf.__version__}")
 
     # 初始化 session_state
     if 'results' not in st.session_state:
