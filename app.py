@@ -270,7 +270,7 @@ def main():
                 status_text.text("步驟 1/5: 下載數據...")
                 data = yf.download(stock_symbol, start=data_start, end=data_end)
 
-                ifdependencesif data.empty:
+                if data.empty:
                     st.error("無法獲取此代碼的數據。請檢查股票代碼或時段！")
                     return
 
