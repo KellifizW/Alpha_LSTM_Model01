@@ -45,7 +45,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數（使用 MeanSquaredError 類）
+# 構建模型函數
 def build_model(input_shape, model_type="original"):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -65,11 +65,17 @@ def build_model(input_shape, model_type="original"):
         model.compile(optimizer='adam', loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     return model
 
-# 數據預處理（支援訓練和預測）
+# 數據預處理（添加空數據檢查）
 def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, is_training=True):
+    if data.empty:
+        raise ValueError("輸入數據為空，無法進行預處理。請檢查數據來源或日期範圍。")
+
     data['Yesterday_Close'] = data['Close'].shift(1)
     data['Average'] = (data['High'] + data['Low'] + data['Close']) / 3
     data = data.dropna()
+
+    if len(data) < timesteps:
+        raise ValueError(f"數據樣本數 ({len(data)}) 小於時間步長 ({timesteps})，無法生成有效輸入。")
 
     features = ['Yesterday_Close', 'Open', 'High', 'Low', 'Average']
     target = 'Close'
@@ -84,6 +90,9 @@ def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, i
         scaled_target = scaler_target.transform(data[[target]])
 
     total_samples = len(scaled_features) - timesteps
+    if total_samples <= 0:
+        raise ValueError(f"數據樣本數不足以生成時間序列，總樣本數: {len(scaled_features)}，時間步長: {timesteps}")
+
     X, y = [], []
     for i in range(total_samples):
         X.append(scaled_features[i:i + timesteps])
@@ -110,7 +119,7 @@ def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, i
 def predict_step(model, x):
     return model(x, training=False)
 
-# 回測與交易策略
+# 回測與交易策略（保持不變）
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -459,8 +468,12 @@ def main():
 
         stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL）", value="TSLA")
         timesteps = st.slider("選擇時間步長（需與訓練時一致）", min_value=10, max_value=100, value=30, step=10)
-        start_date = st.date_input("選擇新數據開始日期", value=datetime(2025, 1, 1))
-        end_date = st.date_input("選擇新數據結束日期", value=datetime(2025, 3, 17))
+        # 調整預設日期範圍，避免未來日期
+        current_date = datetime(2025, 3, 18)  # 當前日期
+        default_start_date = current_date - timedelta(days=90)  # 預設為過去 90 天
+        default_end_date = current_date - timedelta(days=1)  # 預設為昨天
+        start_date = st.date_input("選擇新數據開始日期", value=default_start_date, max_value=current_date)
+        end_date = st.date_input("選擇新數據結束日期", value=default_end_date, max_value=current_date)
 
         model_file = st.file_uploader("上載模型文件 (.h5)", type=["h5"])
         scaler_features_file = st.file_uploader("上載特徵縮放器 (.pkl)", type=["pkl"])
@@ -468,32 +481,35 @@ def main():
 
         if st.button("運行預測") and model_file and scaler_features_file and scaler_target_file:
             with st.spinner("正在載入模型並預測..."):
-                # 載入模型（使用臨時檔案）
+                # 載入模型
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".h5") as tmp_model:
                     tmp_model.write(model_file.read())
                     tmp_model_path = tmp_model.name
                 
-                # 兼容 TensorFlow 2.19 和舊模型的損失函數
                 custom_objects = {
                     "Attention": Attention,
-                    "mse": tf.keras.losses.MeanSquaredError(),  # 舊模型的 'mse' 映射
-                    "MeanSquaredError": tf.keras.losses.MeanSquaredError  # 新模型的類名
+                    "mse": tf.keras.losses.MeanSquaredError(),
+                    "MeanSquaredError": tf.keras.losses.MeanSquaredError
                 }
                 model = load_model(tmp_model_path, custom_objects=custom_objects)
-                os.unlink(tmp_model_path)  # 刪除臨時檔案
+                os.unlink(tmp_model_path)
 
-                # 載入縮放器（直接從文件流讀取）
+                # 載入縮放器
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
-                # 下載新數據
+                # 下載新數據並檢查
                 data = yf.download(stock_symbol, start=start_date, end=end_date)
                 if data.empty:
-                    st.error("無法下載新數據，請檢查股票代碼或日期範圍！")
+                    st.error(f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
                     return
 
                 # 預處理新數據
-                X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features, scaler_target, is_training=False)
+                try:
+                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features, scaler_target, is_training=False)
+                except ValueError as e:
+                    st.error(str(e))
+                    return
 
                 # 進行預測
                 predictions = predict_step(model, X_new)
@@ -513,7 +529,7 @@ def main():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 顯示評估指標（如果有實際數據）
+                # 顯示評估指標
                 if len(y_new) > 0:
                     mae = mean_absolute_error(y_new, predictions)
                     rmse = np.sqrt(mean_squared_error(y_new, predictions))
