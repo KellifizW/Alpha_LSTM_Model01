@@ -487,7 +487,7 @@ def main():
     if st.button("還原狀態"):
         st.session_state['results'] = None
         st.session_state['training_progress'] = 40
-        st.experimental_rerun()  # 強制重新運行以刷新頁面
+        st.rerun()  # 強制重新運行以刷新頁面
 
 if __name__ == "__main__":
     main()
