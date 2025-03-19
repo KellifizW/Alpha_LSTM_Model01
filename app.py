@@ -160,12 +160,10 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
         signal_pred = data['Signal_pred'].iloc[i]
         pred_price = data['Predicted'].iloc[i] if not pd.isna(data['Predicted'].iloc[i]) else close_price
 
-        # 調試：檢查當前值
         if i == test_start_idx or i == test_end_idx:
             st.write(f"日期: {data.index[i]}, MACD_pred: {macd_pred:.4f}, Signal_pred: {signal_pred:.4f}")
 
-        # 金叉與死叉計算
-        if i > test_start_idx:  # 確保有前一天數據
+        if i > test_start_idx:
             if pd.notna(macd_pred) and pd.notna(signal_pred):
                 prev_macd = data['MACD_pred'].iloc[i - 1]
                 prev_signal = data['Signal_pred'].iloc[i - 1]
@@ -174,7 +172,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                 elif macd_pred < signal_pred and prev_macd >= prev_signal:
                     death_cross.append((data.index[i], macd_pred))
 
-        # 止損規則
         if position == 1 and pred_price < close_price * 0.98:
             capital += shares * close_price
             position = 0
@@ -182,7 +179,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
             sell_signals.append((data.index[i], close_price))
             st.write(f"止損賣出: {data.index[i]}, 價格: {close_price:.2f}")
 
-        # 買入信號
         elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
@@ -191,7 +187,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                 buy_signals.append((data.index[i], close_price))
                 st.write(f"買入: {data.index[i]}, 價格: {close_price:.2f}")
 
-        # 賣出信號
         elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
             if position == 1:
                 capital += shares * close_price
@@ -284,10 +279,14 @@ def main():
             model_type_selected = "original" if model_type.startswith("original") else "lstm_simple"
             model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected)
 
+            # 打印模型結構
+            st.write("模型結構：")
+            model.summary(print_fn=lambda x: st.write(x))
+
             # 添加進度回調
-            progress_per_epoch = 20 / epochs  # 訓練部分佔總進度的 20%，平分到每個 epoch
+            progress_per_epoch = 20 / epochs
             if 'training_progress' not in st.session_state:
-                st.session_state['training_progress'] = 40  # 初始進度為 40%
+                st.session_state['training_progress'] = 40
 
             def update_progress(epoch, logs):
                 st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
@@ -296,14 +295,30 @@ def main():
 
             epoch_callback = LambdaCallback(on_epoch_end=update_progress)
 
+            # 訓練並檢查損失
             history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[epoch_callback])
-            
+            st.write("訓練完成！")
+            st.write(f"最終訓練損失: {history.history['loss'][-1]:.4f}")
+            st.write(f"最終驗證損失: {history.history['val_loss'][-1]:.4f}")
+
+            # 繪製損失曲線
+            fig_loss = go.Figure()
+            fig_loss.add_trace(go.Scatter(y=history.history['loss'], mode='lines', name='Training Loss'))
+            fig_loss.add_trace(go.Scatter(y=history.history['val_loss'], mode='lines', name='Validation Loss'))
+            fig_loss.update_layout(title='訓練與驗證損失曲線', xaxis_title='Epoch', yaxis_title='Loss')
+            st.plotly_chart(fig_loss)
+
             progress_bar.progress(60)
             status_text.text("步驟 4/5: 進行價格預測...")
             predictions = predict_step(model, X_test)
             predictions = scaler_target.inverse_transform(predictions)
             y_test = scaler_target.inverse_transform(y_test)
-            
+
+            # 檢查預測結果
+            st.write(f"預測結果樣本（前5個）：{predictions[:5].flatten()}")
+            if np.any(np.isnan(predictions)) or np.any(np.isinf(predictions)):
+                st.error("預測結果中包含無效值（NaN或Inf），模型訓練可能有問題！")
+
             progress_bar.progress(80)
             status_text.text("步驟 5/5: 執行回測...")
             result = backtest(full_data, predictions, test_dates, period_start, period_end)
