@@ -219,17 +219,13 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 # 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
-
-    # 顯示 Streamlit 版本
     st.write(f"當前 Streamlit 版本: {st.__version__}")
 
-    # 初始化 session_state
     if 'results' not in st.session_state:
         st.session_state['results'] = None
     if 'training_progress' not in st.session_state:
         st.session_state['training_progress'] = 40
 
-    # 模式選擇
     mode = st.sidebar.selectbox("選擇模式", ["訓練模式", "預測模式"])
 
     if mode == "訓練模式":
@@ -243,26 +239,23 @@ def main():
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型", ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
         
-        # 添加學習率選擇下拉選單
         learning_rate_options = [1e-5, 1e-4, 5e-4, 1e-3, 5e-3]
         selected_learning_rate = st.selectbox(
             "選擇 Adam 學習率",
             options=learning_rate_options,
-            index=3,  # 預設值為 1e-3 (0.001)，對應索引 3
-            format_func=lambda x: f"{x:.5f}",  # 格式化顯示
+            index=3,
+            format_func=lambda x: f"{x:.5f}",
             help="選擇 Adam 優化器的學習率，影響模型訓練速度和收斂性。"
         )
 
-        # 動態獲取當前美國東部時間
         eastern = pytz.timezone('US/Eastern')
-        current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)  # 設置為當天0點
-        start_date = current_date - timedelta(days=1095)  # 過去3年 (約1095天)
+        current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = current_date - timedelta(days=1095)
         periods = []
         temp_end_date = current_date
 
-        # 生成回測時段選項（每段約180天）
         while temp_end_date >= start_date:
-            period_start = temp_end_date - timedelta(days=179)  # 約6個月
+            period_start = temp_end_date - timedelta(days=179)
             if period_start < start_date:
                 period_start = start_date
             periods.append(f"{period_start.strftime('%Y-%m-%d')} to {temp_end_date.strftime('%Y-%m-%d')}")
@@ -281,7 +274,7 @@ def main():
                 period_start_str, period_end_str = selected_period.split(" to ")
                 period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
                 period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
-                data_start = period_start - timedelta(days=1095)  # 訓練數據從更早的時間開始
+                data_start = period_start - timedelta(days=1095)
                 data_end = period_end + timedelta(days=1)
 
                 ticker = yf.Ticker(stock_symbol)
@@ -302,16 +295,20 @@ def main():
                     st.error("無法獲取此代碼的數據。請檢查股票代碼或時段！")
                     return
 
-                # 計算實際下載的數據範圍和交易日數
                 actual_start_date = data.index[0].strftime('%Y-%m-%d')
                 actual_end_date = data.index[-1].strftime('%Y-%m-%d')
                 total_trading_days = len(data)
+
+                # 計算數據統計特性
+                daily_returns = data['Close'].pct_change().dropna()
+                volatility = daily_returns.std()
+                mean_return = daily_returns.mean()
+                autocorrelation = daily_returns.autocorr()
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
                 X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(data, timesteps, is_training=True)
 
-                # 計算樣本數和數據範圍
                 total_samples = len(X_train) + len(X_test)
                 train_samples = len(X_train)
                 test_samples = len(X_test)
@@ -328,7 +325,6 @@ def main():
                 model.summary(print_fn=lambda x: model_summary.write(x + '\n'))
                 st.text(model_summary.getvalue())
 
-                # 添加運算記錄
                 st.subheader("運算記錄")
                 st.write(f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
                 st.write(f"實際已下載的數據範圍: {actual_start_date} to {actual_end_date}")
@@ -338,6 +334,7 @@ def main():
                 st.write(f"測試樣本數: {test_samples}")
                 st.write(f"訓練數據範圍: {train_date_range}")
                 st.write(f"測試數據範圍: {test_date_range}")
+                st.write(f"數據統計特性 - 日收益率均值: {mean_return:.6f}, 波動率: {volatility:.6f}, 自相關係數: {autocorrelation:.6f}")
 
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
@@ -437,10 +434,10 @@ def main():
                     'mape': mape,
                     'elapsed_time': elapsed_time,
                     'stock_symbol': stock_symbol,
-                    'selected_period': selected_period
+                    'selected_period': selected_period,
+                    'history': history.history  # 保存訓練歷史
                 }
 
-        # 顯示訓練結果
         if st.session_state['results'] is not None:
             results = st.session_state['results']
             stock_symbol = results['stock_symbol']
