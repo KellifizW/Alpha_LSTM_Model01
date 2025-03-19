@@ -302,9 +302,21 @@ def main():
                     st.error("無法獲取此代碼的數據。請檢查股票代碼或時段！")
                     return
 
+                # 計算實際下載的數據範圍和交易日數
+                actual_start_date = data.index[0].strftime('%Y-%m-%d')
+                actual_end_date = data.index[-1].strftime('%Y-%m-%d')
+                total_trading_days = len(data)
+
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
                 X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(data, timesteps, is_training=True)
+
+                # 計算樣本數和數據範圍
+                total_samples = len(X_train) + len(X_test)
+                train_samples = len(X_train)
+                test_samples = len(X_test)
+                train_date_range = f"{full_data.index[timesteps].strftime('%Y-%m-%d')} to {full_data.index[timesteps + train_samples - 1].strftime('%Y-%m-%d')}"
+                test_date_range = f"{test_dates[0].strftime('%Y-%m-%d')} to {test_dates[-1].strftime('%Y-%m-%d')}"
 
                 progress_bar.progress(40)
                 status_text.text("步驟 3/5: 訓練模型...")
@@ -315,6 +327,17 @@ def main():
                 model_summary = io.StringIO()
                 model.summary(print_fn=lambda x: model_summary.write(x + '\n'))
                 st.text(model_summary.getvalue())
+
+                # 添加運算記錄
+                st.subheader("運算記錄")
+                st.write(f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
+                st.write(f"實際已下載的數據範圍: {actual_start_date} to {actual_end_date}")
+                st.write(f"總共交易日: {total_trading_days}")
+                st.write(f"總樣本數: {total_samples}")
+                st.write(f"訓練樣本數: {train_samples}")
+                st.write(f"測試樣本數: {test_samples}")
+                st.write(f"訓練數據範圍: {train_date_range}")
+                st.write(f"測試數據範圍: {test_date_range}")
 
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
