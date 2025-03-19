@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import pickle
 import io
 import os
+import tempfile
 
 # 自訂 Attention 層
 class Attention(Layer):
@@ -61,7 +62,7 @@ def build_model(input_shape, model_type="original"):
         model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     return model
 
-# 數據預處理（用於訓練和預測）
+# 數據預處理（支援訓練和預測）
 def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, is_training=True):
     data['Yesterday_Close'] = data['Close'].shift(1)
     data['Average'] = (data['High'] + data['Low'] + data['Close']) / 3
@@ -106,7 +107,7 @@ def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, i
 def predict_step(model, x):
     return model(x, training=False)
 
-# 回測與交易策略（保持不變）
+# 回測與交易策略
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -464,8 +465,14 @@ def main():
 
         if st.button("運行預測") and model_file and scaler_features_file and scaler_target_file:
             with st.spinner("正在載入模型並預測..."):
-                # 載入模型和縮放器
-                model = load_model(model_file, custom_objects={"Attention": Attention})
+                # 載入模型（使用臨時檔案）
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".h5") as tmp_model:
+                    tmp_model.write(model_file.read())
+                    tmp_model_path = tmp_model.name
+                model = load_model(tmp_model_path, custom_objects={"Attention": Attention})
+                os.unlink(tmp_model_path)  # 刪除臨時檔案
+
+                # 載入縮放器（直接從文件流讀取）
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
