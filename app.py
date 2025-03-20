@@ -28,8 +28,7 @@ class Attention(Layer):
         super(Attention, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.W_h = self.add_weight(name='W_h', shape=(input_shape[-1], input_shape[-1]), initializer='random_normal',
-                                   trainable=True)
+        self.W_h = self.add_weight(name='W_h', shape=(input_shape[-1], input_shape[-1]), initializer='random_normal', trainable=True)
         self.b_h = self.add_weight(name='b_h', shape=(input_shape[-1],), initializer='zeros', trainable=True)
         self.W_a = self.add_weight(name='W_a', shape=(input_shape[-1], 1), initializer='random_normal', trainable=True)
         super(Attention, self).build(input_shape)
@@ -54,8 +53,7 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
         model.add(Dropout(0.01))
         model.add(Dense(32, activation='relu'))
         model.add(Dense(1))
-        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(),
-                      metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     else:
         inputs = Input(shape=input_shape)
         x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
@@ -64,8 +62,7 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
         x = Attention()(x)
         outputs = Dense(1)(x)
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(),
-                      metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
     return model
 
 def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None, scaler_target=None, is_training=True):
@@ -133,10 +130,8 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
     test_mask = data.index.isin(test_dates)
-    data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12,
-                                                                                               adjust=False).mean()
-    data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26,
-                                                                                               adjust=False).mean()
+    data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12, adjust=False).mean()
+    data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26, adjust=False).mean()
     data['MACD_pred'] = data['EMA12_pred'] - data['EMA26_pred']
     data['Signal_pred'] = data['MACD_pred'].ewm(span=9, adjust=False).mean()
 
@@ -190,8 +185,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
             sell_signals.append((data.index[i], close_price))
             st.write(f"止損賣出: {data.index[i]}, 價格: {close_price:.2f}")
 
-        elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= \
-                data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
                 capital -= shares * close_price
@@ -199,8 +193,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                 buy_signals.append((data.index[i], close_price))
                 st.write(f"買入: {data.index[i]}, 價格: {close_price:.2f}")
 
-        elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= \
-                data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
             if position == 1:
                 capital += shares * close_price
                 position = 0
@@ -233,19 +226,9 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     )
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
-# 將 update_progress 移到全域，並接受進度條和狀態文字作為參數
-def update_progress(epoch, logs, progress_bar, status_text, epochs, training_progress):
-    training_progress = min(60, training_progress + 20 / epochs)
-    progress_bar.progress(int(training_progress))
-    status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
-    return training_progress
-
 @st.cache_resource
-def train_model(_model, X_train, y_train, epochs, progress_bar, status_text):
-    training_progress = st.session_state['training_progress']
-    callback = LambdaCallback(on_epoch_end=lambda epoch, logs: update_progress(epoch, logs, progress_bar, status_text, epochs, training_progress))
-    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
-                         callbacks=[callback])
+def train_model(_model, X_train, y_train, epochs):
+    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1)
     return _model, history.history
 
 def main():
@@ -315,16 +298,6 @@ def main():
                 data_start = start_date
                 data_end = period_end + timedelta(days=1)
 
-                ticker = yf.Ticker(stock_symbol)
-                try:
-                    first_trade_date = pd.to_datetime(ticker.info.get('firstTradeDateEpochUtc', 0), unit='s')
-                    if first_trade_date > pd.to_datetime(data_start):
-                        st.error(
-                            f"股票 {stock_symbol} 上市日期為 {first_trade_date.strftime('%Y-%m-%d')}，無法提供 {data_start.strftime('%Y-%m-%d')} 之前的數據！")
-                        return
-                except Exception as e:
-                    st.warning(f"無法獲取股票 {stock_symbol} 的上市日期，繼續下載數據...（錯誤：{e}）")
-
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 status_text.text("步驟 1/5: 下載數據...")
@@ -351,7 +324,7 @@ def main():
                 try:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
-                    autocorrelation = daily_returns.autocorr()
+                    autocorrelation = daily_returns.autocorr()  # 使用 Series 的 autocorr 方法
                 except Exception as e:
                     volatility = mean_return = autocorrelation = "N/A"
                     st.warning(f"警告：無法計算統計特性，錯誤: {str(e)}")
@@ -380,8 +353,7 @@ def main():
                 st.text(model_summary.getvalue())
 
                 st.subheader("運算記錄")
-                st.write(
-                    f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
+                st.write(f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
                 st.write(f"實際已下載的數據範圍: {actual_start_date} to {actual_end_date}")
                 st.write(f"總共交易日: {total_trading_days}")
                 st.write(f"總樣本數: {total_samples}")
@@ -391,12 +363,18 @@ def main():
                 st.write(f"測試數據範圍: {test_date_range}")
                 mean_display = f"{mean_return:.6f}" if isinstance(mean_return, (int, float)) else mean_return
                 volatility_display = f"{volatility:.6f}" if isinstance(volatility, (int, float)) else volatility
-                autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation,
-                                                                                 (int, float)) else autocorrelation
-                st.write(
-                    f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
+                autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
+                st.write(f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
-                model, history = train_model(model, X_train, y_train, epochs, progress_bar, status_text)
+                progress_per_epoch = 20 / epochs
+                def update_progress(epoch, logs):
+                    st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
+                    progress_bar.progress(int(st.session_state['training_progress']))
+                    status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
+
+                model, history = train_model(model, X_train, y_train, epochs)
+                callback = LambdaCallback(on_epoch_end=update_progress)
+                model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[callback])
 
                 progress_bar.progress(60)
                 status_text.text("步驟 4/5: 進行價格預測...")
@@ -423,16 +401,12 @@ def main():
                 filtered_predictions = predictions[mask]
 
                 fig_price = go.Figure()
-                fig_price.add_trace(
-                    go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
-                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines',
-                                               name='Predicted Price'))
+                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
+                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
                 buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
                 sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
-                fig_price.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal',
-                                               marker=dict(symbol='triangle-up', size=10, color='green')))
-                fig_price.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal',
-                                               marker=dict(symbol='triangle-down', size=10, color='red')))
+                fig_price.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
+                fig_price.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
                 fig_price.update_layout(
                     title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})',
                     xaxis_title='Date',
@@ -450,17 +424,11 @@ def main():
                 golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
                 death_x, death_y = zip(*death_cross) if death_cross else ([], [])
                 fig_macd = go.Figure()
-                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines',
-                                              name='MACD Line (Predicted)'))
-                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines',
-                                              name='Signal Line (Predicted)'))
-                fig_macd.add_trace(
-                    go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines',
-                               name='Zero Line', line=dict(dash='dash')))
-                fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross',
-                                              marker=dict(symbol='circle', size=10, color='green')))
-                fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross',
-                                              marker=dict(symbol='circle', size=10, color='red')))
+                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines', name='MACD Line (Predicted)'))
+                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines', name='Signal Line (Predicted)'))
+                fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
+                fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
+                fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
                 fig_macd.update_layout(
                     title=f'{stock_symbol} MACD Analysis ({selected_period})',
                     xaxis_title='Date',
@@ -600,8 +568,7 @@ def main():
                     return
 
                 try:
-                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features,
-                                                                         scaler_target, is_training=False)
+                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features, scaler_target, is_training=False)
                 except ValueError as e:
                     st.error(str(e))
                     return
@@ -621,13 +588,7 @@ def main():
                     pred = predict_step(model, last_sequence[np.newaxis, :])
                     pred_price = scaler_target.inverse_transform(pred)[0, 0]
                     future_predictions.append(pred_price)
-                    new_features = [
-                        last_close,
-                        last_open,
-                        last_high,
-                        last_low,
-                        pred_price
-                    ]
+                    new_features = [last_close, last_open, last_high, last_low, pred_price]
                     scaled_new_features = scaler_features.transform([new_features])[0]
                     last_sequence = np.roll(last_sequence, -1, axis=0)
                     last_sequence[-1] = scaled_new_features
