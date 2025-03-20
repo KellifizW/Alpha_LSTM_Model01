@@ -179,7 +179,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
         if i > test_start_idx:
             if pd.notna(macd_pred) and pd.notna(signal_pred):
-                prev_macd = data['MACD_pred'].iloc[i - 1]
+                prev_macd = data niks['MACD_pred'].iloc[i - 1]
                 prev_signal = data['Signal_pred'].iloc[i - 1]
                 if macd_pred > signal_pred and prev_macd <= prev_signal:
                     golden_cross.append((data.index[i], macd_pred))
@@ -234,10 +234,9 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     )
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
-@st.cache_resource
-def train_model(_model, X_train, y_train, epochs, callbacks=None):
-    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=callbacks)
-    return _model, history.history
+def train_model(model, X_train, y_train, epochs, _callbacks=None):
+    history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=_callbacks)
+    return model, history.history
 
 def main():
     st.title("股票價格預測與回測系統 BETA")
@@ -330,6 +329,8 @@ def main():
                     return
                 daily_returns = data['Close'].pct_change().dropna()  # 確保是 Series
                 try:
+                    if not isinstance(daily_returns, pd.Series):
+                        raise TypeError("daily_returns 不是 pd.Series")
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
                     autocorrelation = daily_returns.autocorr()  # 使用 Series 的 autocorr 方法
@@ -382,7 +383,7 @@ def main():
 
                 # 使用 train_model 進行訓練
                 callback = [LambdaCallback(on_epoch_end=update_progress)]
-                model, history = train_model(model, X_train, y_train, epochs, callbacks=callback)
+                model, history = train_model(model, X_train, y_train, epochs, _callbacks=callback)
 
                 progress_bar.progress(60)
                 status_text.text("步驟 4/5: 進行價格預測...")
