@@ -117,11 +117,12 @@ def preprocess_data(data, timesteps, predict_days=1, train_split_ratio=0.7, scal
         y_test = y[train_size:]
         y_current_train = y_current[:train_size]
         y_current_test = y_current[train_size:]
-        test_dates = data_index[timesteps + train_size:timesteps + train_size + test_size]
+        # 調整 test_dates 計算方式，確保包含最後的日期
+        test_dates = data_index[timesteps + train_size - 1 + predict_days:timesteps + train_size + test_size + predict_days - 1]
         return X_train, X_test, y_train, y_test, y_current_train, y_current_test, scaler_features, scaler_target, test_dates, data
     else:
         data_index = data.index
-        test_dates = data_index[timesteps:timesteps + total_samples]
+        test_dates = data_index[timesteps + predict_days - 1:timesteps + total_samples + predict_days - 1]
         return X, y, y_current, test_dates, data
 
 @tf.function(reduce_retracing=True)
@@ -187,7 +188,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                     capital_pred -= shares_pred * close_price
                     position_pred = 1
                     buy_signals_pred.append((data.index[i], close_price))
-                    st.write(f"[預測策略] 買入: {data.index[i]}, 價格: {close_price:.2f}")
             elif macd_pred < signal_pred and prev_macd_pred >= prev_signal_pred:
                 death_cross_pred.append((data.index[i], macd_pred))
                 if position_pred == 1:
@@ -195,8 +195,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                     position_pred = 0
                     shares_pred = 0
                     sell_signals_pred.append((data.index[i], close_price))
-                    # 移除賣出信號的除錯資訊
-                    # st.write(f"[預測策略] 賣出: {data.index[i]}, 價格: {close_price:.2f}")
         total_value_pred = capital_pred + (shares_pred * close_price if position_pred > 0 else 0)
         capital_values_pred.append(total_value_pred)
         if i > test_start_idx:
@@ -209,7 +207,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                     capital_actual -= shares_actual * close_price
                     position_actual = 1
                     buy_signals_actual.append((data.index[i], close_price))
-                    st.write(f"[實際策略] 買入: {data.index[i]}, 價格: {close_price:.2f}")
             elif macd < signal and prev_macd >= prev_signal:
                 death_cross_actual.append((data.index[i], macd))
                 if position_actual == 1:
@@ -217,8 +214,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                     position_actual = 0
                     shares_actual = 0
                     sell_signals_actual.append((data.index[i], close_price))
-                    # 移除賣出信號的除錯資訊
-                    # st.write(f"[實際策略] 賣出: {data.index[i]}, 價格: {close_price:.2f}")
         total_value_actual = capital_actual + (shares_actual * close_price if position_actual > 0 else 0)
         capital_values_actual.append(total_value_actual)
     capital_values_pred = np.array(capital_values_pred)
@@ -229,13 +224,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     total_return_actual = (capital_values_actual[-1] / capital_values_actual[0] - 1) * 100
     max_return_actual = (max(capital_values_actual) / capital_values_actual[0] - 1) * 100
     min_return_actual = (min(capital_values_actual) / capital_values_actual[0] - 1) * 100
-    st.write("### 買入信號記錄")
-    for date, price in buy_signals_pred:
-        st.write(f"買入信號 - 日期: {date}, 價格: {price:.2f}")
-    # 移除賣出信號記錄的除錯資訊
-    # st.write("### 賣出信號記錄")
-    # for date, price in sell_signals_pred:
-    #     st.write(f"賣出信號 - 日期: {date}, 價格: {price:.2f}")
     return (
         data,
         capital_values_pred, total_return_pred, max_return_pred, min_return_pred,
@@ -260,57 +248,39 @@ def train_model(model, X_train, y_train, epochs, _callbacks=None):
     return model, history.history
 
 def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_symbol, title, buy_signals_pred=None, sell_signals_pred=None, buy_signals_actual=None, sell_signals_actual=None):
-    # 除錯：檢查數據長度和內容
-    st.write(f"除錯 - 日期長度: {len(dates)}")
-    st.write(f"除錯 - 實際價格長度: {len(actual_prices)}")
-    st.write(f"除錯 - 預測價格長度: {len(predicted_prices)}")
-    st.write(f"除錯 - 前5個日期: {dates[:5]}")
-    st.write(f"除錯 - 前5個實際價格: {actual_prices[:5]}")
-    st.write(f"除錯 - 前5個預測價格: {predicted_prices[:5]}")
+    # 過濾掉 NaN 值，只保留有數據的交易日
+    valid_mask = ~np.isnan(actual_prices)  # 假設 actual_prices 和 predicted_prices 的 NaN 位置一致
+    valid_dates = dates[valid_mask]
+    valid_actual_prices = actual_prices[valid_mask]
+    valid_predicted_prices = predicted_prices[valid_mask]
 
-    # 確保數據長度一致
-    min_length = min(len(dates), len(actual_prices), len(predicted_prices))
-    if min_length == 0:
+    if len(valid_dates) == 0:
         st.error("數據長度為0，無法繪製圖表！請檢查數據過濾或預測過程。")
         return go.Figure()
 
-    dates = dates[:min_length]
-    actual_prices = actual_prices[:min_length]
-    predicted_prices = predicted_prices[:min_length]
-
-    # 確保日期格式正確
-    dates = [pd.Timestamp(d).strftime('%Y-%m-%d') if isinstance(d, (pd.Timestamp, datetime)) else d for d in dates]
-
-    # 確保價格數據是一維數組
-    actual_prices = np.array(actual_prices).flatten()
-    predicted_prices = np.array(predicted_prices).flatten()
-
-    # 除錯：檢查處理後的數據
-    st.write(f"除錯 - 處理後日期長度: {len(dates)}")
-    st.write(f"除錯 - 處理後實際價格長度: {len(actual_prices)}")
-    st.write(f"除錯 - 處理後預測價格長度: {len(predicted_prices)}")
+    # 將日期轉換為字符串格式
+    date_labels = [pd.Timestamp(d).strftime('%Y-%m-%d') if isinstance(d, (pd.Timestamp, datetime)) else d for d in valid_dates]
 
     fig = go.Figure()
-    # 使用更美觀的顏色，參考 fig_macd 和 fig_macd_compare 的配色
     fig.add_trace(go.Scatter(
-        x=dates,
-        y=actual_prices,
-        mode='lines',  # 僅顯示線條，移除點
+        x=valid_dates,
+        y=valid_actual_prices,
+        mode='lines',
         name='實際股價',
-        line=dict(color='#1f77b4')  # 深藍色
+        line=dict(color='#1f77b4'),
+        connectgaps=True
     ))
     fig.add_trace(go.Scatter(
-        x=dates,
-        y=predicted_prices,
-        mode='lines',  # 僅顯示線條，移除點
+        x=valid_dates,
+        y=valid_predicted_prices,
+        mode='lines',
         name='預測股價',
-        line=dict(color='#ff7f0e', dash='dash')  # 橙色
+        line=dict(color='#ff7f0e', dash='dash'),
+        connectgaps=True
     ))
 
-    # 標記基於預測 MACD 策略的買入和賣出點
     if buy_signals_pred:
         buy_dates_pred, buy_prices_pred = zip(*buy_signals_pred)
-        buy_dates_pred = [pd.Timestamp(d).strftime('%Y-%m-%d') for d in buy_dates_pred]
         fig.add_trace(go.Scatter(
             x=buy_dates_pred,
             y=buy_prices_pred,
@@ -320,7 +290,6 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
         ))
     if sell_signals_pred:
         sell_dates_pred, sell_prices_pred = zip(*sell_signals_pred)
-        sell_dates_pred = [pd.Timestamp(d).strftime('%Y-%m-%d') for d in sell_dates_pred]
         fig.add_trace(go.Scatter(
             x=sell_dates_pred,
             y=sell_prices_pred,
@@ -329,10 +298,8 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
             marker=dict(symbol='triangle-down', size=10, color='red')
         ))
 
-    # 標記基於實際 MACD 策略的買入和賣出點
     if buy_signals_actual:
         buy_dates_actual, buy_prices_actual = zip(*buy_signals_actual)
-        buy_dates_actual = [pd.Timestamp(d).strftime('%Y-%m-%d') for d in buy_dates_actual]
         fig.add_trace(go.Scatter(
             x=buy_dates_actual,
             y=buy_prices_actual,
@@ -342,7 +309,6 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
         ))
     if sell_signals_actual:
         sell_dates_actual, sell_prices_actual = zip(*sell_signals_actual)
-        sell_dates_actual = [pd.Timestamp(d).strftime('%Y-%m-%d') for d in sell_dates_actual]
         fig.add_trace(go.Scatter(
             x=sell_dates_actual,
             y=sell_prices_actual,
@@ -351,16 +317,23 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
             marker=dict(symbol='triangle-down', size=10, color='darkred')
         ))
 
+    # 設置 x 軸刻度，顯示每 5 個交易日的日期
+    tick_indices = np.arange(0, len(valid_dates), 5)  # 每 5 個交易日顯示一個刻度
+    tick_dates = [date_labels[i] for i in tick_indices]
+
     fig.update_layout(
         title=f'{stock_symbol} - {title}',
         xaxis_title='日期',
         yaxis_title='價格 (USD)',
         hovermode='x unified',
         xaxis=dict(
+            tickmode='array',
+            tickvals=[valid_dates[i] for i in tick_indices],  # 使用交易日的日期作為刻度值
+            ticktext=tick_dates,  # 顯示對應的日期標籤
             tickformat='%Y-%m-%d',
             tickangle=45,
-            rangeslider=dict(visible=False),
-            type='date'
+            type='date',  # 確保 x 軸按日期格式處理
+            rangeslider=dict(visible=False)
         ),
         template='plotly_white',
         height=600,
@@ -397,7 +370,6 @@ def main():
 
     mode = st.sidebar.selectbox("選擇模式", ["訓練模式", "預測模式"])
 
-    # Plotly 配置
     plotly_config = {
         'toImageButtonOptions': {
             'format': 'png',
@@ -454,15 +426,17 @@ def main():
                 if data is None:
                     return
                 if len(data) < timesteps + predict_days - 1:
-                    st.error(f"下載的數據樣本數 ({len(data)}) 小於時間步長加預測天數 ({timesteps + predict_days - 1})。\n"
-                             f"請選擇更長的下載歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）或預測天數（當前為 {predict_days}）。")
+                    st.error(
+                        f"下載的數據樣本數 ({len(data)}) 小於時間步長加預測天數 ({timesteps + predict_days - 1})。\n"
+                        f"請選擇更長的下載歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）或預測天數（當前為 {predict_days}）。")
                     return
                 data_temp = data.copy()
                 data_temp['Yesterday_Close'] = data_temp['Close'].shift(1)
                 data_temp = data_temp.dropna()
                 if len(data_temp) < timesteps + predict_days - 1:
-                    st.error(f"下載的數據樣本數 ({len(data_temp)}) 小於時間步長加預測天數 ({timesteps + predict_days - 1})。\n"
-                             f"請選擇更長的下載歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）或預測天數（當前為 {predict_days}）。")
+                    st.error(
+                        f"下載的數據樣本數 ({len(data_temp)}) 小於時間步長加預測天數 ({timesteps + predict_days - 1})。\n"
+                        f"請選擇更長的下載歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）或預測天數（當前為 {predict_days}）。")
                     return
                 original_data = data.copy()
                 actual_start_date = data.index[0].strftime('%Y-%m-%d')
@@ -498,7 +472,8 @@ def main():
                 progress_bar.progress(40)
                 status_text.text("步驟 3/5: 訓練模型...")
                 model_type_selected = "original" if model_type.startswith("original") else "lstm_simple"
-                model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected, learning_rate=selected_learning_rate)
+                model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected,
+                                    learning_rate=selected_learning_rate)
                 total_params = model.count_params()
                 st.write(f"模型參數總數: {total_params:,}")
                 st.subheader("運算記錄")
@@ -553,35 +528,57 @@ def main():
                 test_dates = test_dates
                 period_start = pd.to_datetime(period_start)
                 period_end = pd.to_datetime(period_end)
-                # 除錯：檢查 test_dates 和 predictions 的長度
-                st.write(f"除錯 - test_dates 長度: {len(test_dates)}")
-                st.write(f"除錯 - predictions 長度: {len(predictions)}")
-                st.write(f"除錯 - test_dates 範圍: {test_dates[0]} 到 {test_dates[-1]}")
-                # 過濾數據以匹配回測時段
+
+                # 創建完整的日期範圍（包括非交易日）
+                full_date_range = pd.date_range(start=period_start, end=period_end, freq='D', tz=eastern)
+                # 過濾 test_dates，確保包含在回測時段內的日期
                 mask = (test_dates >= period_start) & (test_dates <= period_end)
                 filtered_dates = test_dates[mask]
-                # 確保 filtered_dates 不為空
                 if len(filtered_dates) == 0:
                     st.error(
                         f"過濾後的日期範圍為空！請檢查回測時段 ({period_start} 到 {period_end}) 是否在測試數據範圍 ({test_dates[0]} 到 {test_dates[-1]}) 內。")
                     return
-                # 獲取實際價格
+
+                # 獲取實際價格和預測價格
                 filtered_y_test = full_data.loc[filtered_dates, 'Close'].values
-                # 過濾預測價格
                 filtered_predictions = predictions[mask]
-                # 確保 filtered_predictions 是一維數組
                 if filtered_predictions.ndim > 1:
                     filtered_predictions = filtered_predictions.flatten()
-                # 除錯：檢查過濾後的數據長度
-                st.write(f"除錯 - 過濾後日期長度: {len(filtered_dates)}")
-                st.write(f"除錯 - 過濾後實際價格長度: {len(filtered_y_test)}")
-                st.write(f"除錯 - 過濾後預測價格長度: {len(filtered_predictions)}")
+
+                # 將 filtered_dates 擴展到完整的日期範圍
+                extended_dates = full_date_range
+                extended_y_test = np.full(len(extended_dates), np.nan)
+                extended_predictions = np.full(len(extended_dates), np.nan)
+
+                # 將 filtered_dates 的數據映射到 extended_dates
+                date_to_idx = {d.date(): i for i, d in enumerate(extended_dates)}
+                for i, date in enumerate(filtered_dates):
+                    idx = date_to_idx.get(date.date())
+                    if idx is not None:
+                        extended_y_test[idx] = filtered_y_test[i]
+                        extended_predictions[idx] = filtered_predictions[i]
+
+                # 調整 buy_signals 和 sell_signals 的日期，使其匹配 extended_dates
+                def adjust_signals(signals, date_to_idx):
+                    adjusted_signals = []
+                    for date, price in signals:
+                        idx = date_to_idx.get(date.date())
+                        if idx is not None:
+                            adjusted_signals.append((extended_dates[idx], price))
+                    return adjusted_signals
+
+                buy_signals_pred = adjust_signals(buy_signals_pred, date_to_idx)
+                sell_signals_pred = adjust_signals(sell_signals_pred, date_to_idx)
+                buy_signals_actual = adjust_signals(buy_signals_actual, date_to_idx)
+                sell_signals_actual = adjust_signals(sell_signals_actual, date_to_idx)
+
                 # 繪製圖表
                 fig_loss = go.Figure()
                 fig_loss.add_trace(go.Scatter(y=history['loss'], mode='lines', name='Training Loss'))
                 fig_loss.add_trace(go.Scatter(y=history['val_loss'], mode='lines', name='Validation Loss'))
                 fig_loss.update_layout(title='訓練與驗證損失曲線', xaxis_title='Epoch', yaxis_title='Loss', height=400,
                                        width=600)
+
                 data_backtest = full_data.loc[period_start:period_end].copy()
                 golden_x_pred, golden_y_pred = zip(*golden_cross_pred) if golden_cross_pred else ([], [])
                 death_x_pred, death_y_pred = zip(*death_cross_pred) if death_cross_pred else ([], [])
@@ -599,6 +596,7 @@ def main():
                                               marker=dict(symbol='circle', size=10, color='red')))
                 fig_macd.update_layout(title=f'{stock_symbol} MACD Analysis (Predicted) ({selected_period})',
                                        xaxis_title='Date', yaxis_title='MACD Value', height=400, width=600)
+
                 fig_macd_compare = go.Figure()
                 fig_macd_compare.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines',
                                                       name='MACD (Predicted)'))
@@ -631,16 +629,19 @@ def main():
                 fig_macd_compare.update_layout(
                     title=f'{stock_symbol} MACD Comparison (Predicted vs Actual) ({selected_period})',
                     xaxis_title='Date', yaxis_title='MACD Value', height=400, width=600)
+
                 fig_price = create_price_comparison_chart(
-                    filtered_dates, filtered_y_test, filtered_predictions, stock_symbol,
+                    extended_dates, extended_y_test, extended_predictions, stock_symbol,
                     f"實際 vs 預測股價比較 ({selected_period})",
                     buy_signals_pred=buy_signals_pred, sell_signals_pred=sell_signals_pred,
                     buy_signals_actual=buy_signals_actual, sell_signals_actual=sell_signals_actual
                 )
+
                 mae = mean_absolute_error(filtered_y_test, filtered_predictions)
                 rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
                 r2 = r2_score(filtered_y_test, filtered_predictions)
                 mape = np.mean(np.abs((filtered_y_test - filtered_predictions) / filtered_y_test)) * 100
+
                 st.session_state['results'] = {
                     'model': model,
                     'scaler_features': scaler_features,
@@ -671,96 +672,91 @@ def main():
                     'history': history
                 }
 
-            if st.session_state['results'] is not None:
-                results = st.session_state['results']
-                stock_symbol = results['stock_symbol']
-                selected_period = results['selected_period']
+                progress_bar.progress(100)
+                status_text.text("分析完成！")
 
-                st.subheader("下載訓練結果")
-                temp_model_path = "temp_model.keras"
-                results['model'].save(temp_model_path)
-                with open(temp_model_path, "rb") as f:
-                    model_buffer = io.BytesIO(f.read())
-                st.download_button(label="下載訓練好的模型", data=model_buffer,
-                                   file_name=f"{stock_symbol}_lstm_model.keras", mime="application/octet-stream")
-                os.remove(temp_model_path)
-                scaler_features_buffer = io.BytesIO()
-                pickle.dump(results['scaler_features'], scaler_features_buffer)
-                scaler_features_buffer.seek(0)
-                st.download_button(label="下載特徵縮放器", data=scaler_features_buffer,
-                                   file_name=f"{stock_symbol}_scaler_features.pkl", mime="application/octet-stream")
-                scaler_target_buffer = io.BytesIO()
-                pickle.dump(results['scaler_target'], scaler_target_buffer)
-                scaler_target_buffer.seek(0)
-                st.download_button(label="下載目標縮放器", data=scaler_target_buffer,
-                                   file_name=f"{stock_symbol}_scaler_target.pkl", mime="application/octet-stream")
+        if st.session_state['results'] is not None:
+            results = st.session_state['results']
+            stock_symbol = results['stock_symbol']
+            selected_period = results['selected_period']
 
-                st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
-                st.subheader("圖表分析")
-                # 垂直顯示圖表
-                st.plotly_chart(results['fig_price'], use_container_width=True, config=plotly_config)
-                st.plotly_chart(results['fig_loss'], use_container_width=True, config=plotly_config)
-                st.plotly_chart(results['fig_macd'], use_container_width=True, config=plotly_config)
-                st.plotly_chart(results['fig_macd_compare'], use_container_width=True, config=plotly_config)
+            st.subheader("下載訓練結果")
+            temp_model_path = "temp_model.keras"
+            results['model'].save(temp_model_path)
+            with open(temp_model_path, "rb") as f:
+                model_buffer = io.BytesIO(f.read())
+            st.download_button(label="下載訓練好的模型", data=model_buffer, file_name=f"{stock_symbol}_lstm_model.keras", mime="application/octet-stream")
+            os.remove(temp_model_path)
+            scaler_features_buffer = io.BytesIO()
+            pickle.dump(results['scaler_features'], scaler_features_buffer)
+            scaler_features_buffer.seek(0)
+            st.download_button(label="下載特徵縮放器", data=scaler_features_buffer, file_name=f"{stock_symbol}_scaler_features.pkl", mime="application/octet-stream")
+            scaler_target_buffer = io.BytesIO()
+            pickle.dump(results['scaler_target'], scaler_target_buffer)
+            scaler_target_buffer.seek(0)
+            st.download_button(label="下載目標縮放器", data=scaler_target_buffer, file_name=f"{stock_symbol}_scaler_target.pkl", mime="application/octet-stream")
 
-                st.subheader("回測結果比較")
-                # 並排顯示回測結果
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**基於預測 MACD 的策略**")
-                    st.write(f"初始資金: $100,000")
-                    st.write(f"最終資金: ${results['capital_values_pred'][-1]:.2f}")
-                    st.write(f"總回報率: {results['total_return_pred']:.2f}%")
-                    st.write(f"最大回報率: {results['max_return_pred']:.2f}%")
-                    st.write(f"最小回報率: {results['min_return_pred']:.2f}%")
-                    st.write(f"買入交易次數: {len(results['buy_signals_pred'])}")
-                    st.write(f"賣出交易次數: {len(results['sell_signals_pred'])}")
-                with col2:
-                    st.write("**基於實際 MACD 的策略**")
-                    st.write(f"初始資金: $100,000")
-                    st.write(f"最終資金: ${results['capital_values_actual'][-1]:.2f}")
-                    st.write(f"總回報率: {results['total_return_actual']:.2f}%")
-                    st.write(f"最大回報率: {results['max_return_actual']:.2f}%")
-                    st.write(f"最小回報率: {results['min_return_actual']:.2f}%")
-                    st.write(f"買入交易次數: {len(results['buy_signals_actual'])}")
-                    st.write(f"賣出交易次數: {len(results['sell_signals_actual'])}")
+            st.subheader(f"{stock_symbol} 分析結果（{selected_period}）")
+            st.subheader("圖表分析")
+            st.plotly_chart(results['fig_price'], use_container_width=True, config=plotly_config)
+            st.plotly_chart(results['fig_loss'], use_container_width=True, config=plotly_config)
+            st.plotly_chart(results['fig_macd'], use_container_width=True, config=plotly_config)
+            st.plotly_chart(results['fig_macd_compare'], use_container_width=True, config=plotly_config)
 
-                # 修改買賣記錄對比，分開顯示預測 MACD 和實際 MACD 的記錄
-                st.subheader("買賣記錄對比")
-                # 基於預測 MACD 的策略
+            st.subheader("回測結果比較")
+            col1, col2 = st.columns(2)
+            with col1:
                 st.write("**基於預測 MACD 的策略**")
-                pred_records = []
-                for date, price in results['buy_signals_pred']:
-                    pred_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '買入', '股價': f"{price:.2f}"})
-                for date, price in results['sell_signals_pred']:
-                    pred_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '賣出', '股價': f"{price:.2f}"})
-                pred_records = sorted(pred_records, key=lambda x: x['日期'])
-                if pred_records:
-                    df_pred = pd.DataFrame(pred_records)
-                    st.table(df_pred)
-                else:
-                    st.write("無預測 MACD 策略的買賣記錄可顯示。")
-
-                # 基於實際 MACD 的策略
+                st.write(f"初始資金: $100,000")
+                st.write(f"最終資金: ${results['capital_values_pred'][-1]:.2f}")
+                st.write(f"總回報率: {results['total_return_pred']:.2f}%")
+                st.write(f"最大回報率: {results['max_return_pred']:.2f}%")
+                st.write(f"最小回報率: {results['min_return_pred']:.2f}%")
+                st.write(f"買入交易次數: {len(results['buy_signals_pred'])}")
+                st.write(f"賣出交易次數: {len(results['sell_signals_pred'])}")
+            with col2:
                 st.write("**基於實際 MACD 的策略**")
-                actual_records = []
-                for date, price in results['buy_signals_actual']:
-                    actual_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '買入', '股價': f"{price:.2f}"})
-                for date, price in results['sell_signals_actual']:
-                    actual_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '賣出', '股價': f"{price:.2f}"})
-                actual_records = sorted(actual_records, key=lambda x: x['日期'])
-                if actual_records:
-                    df_actual = pd.DataFrame(actual_records)
-                    st.table(df_actual)
-                else:
-                    st.write("無實際 MACD 策略的買賣記錄可顯示。")
+                st.write(f"初始資金: $100,000")
+                st.write(f"最終資金: ${results['capital_values_actual'][-1]:.2f}")
+                st.write(f"總回報率: {results['total_return_actual']:.2f}%")
+                st.write(f"最大回報率: {results['max_return_actual']:.2f}%")
+                st.write(f"最小回報率: {results['min_return_actual']:.2f}%")
+                st.write(f"買入交易次數: {len(results['buy_signals_actual'])}")
+                st.write(f"賣出交易次數: {len(results['sell_signals_actual'])}")
 
-                st.subheader("模型評估指標")
-                st.write(f"MAE: {results['mae']:.4f}")
-                st.write(f"RMSE: {results['rmse']:.4f}")
-                st.write(f"R²: {results['r2']:.4f}")
-                st.write(f"MAPE: {results['mape']:.2f}%")
-                st.write(f"總耗時: {results['elapsed_time']:.2f} 秒")
+            st.subheader("買賣記錄對比")
+            st.write("**基於預測 MACD 的策略**")
+            pred_records = []
+            for date, price in results['buy_signals_pred']:
+                pred_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '買入', '股價': f"{price:.2f}"})
+            for date, price in results['sell_signals_pred']:
+                pred_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '賣出', '股價': f"{price:.2f}"})
+            pred_records = sorted(pred_records, key=lambda x: x['日期'])
+            if pred_records:
+                df_pred = pd.DataFrame(pred_records)
+                st.table(df_pred)
+            else:
+                st.write("無預測 MACD 策略的買賣記錄可顯示。")
+
+            st.write("**基於實際 MACD 的策略**")
+            actual_records = []
+            for date, price in results['buy_signals_actual']:
+                actual_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '買入', '股價': f"{price:.2f}"})
+            for date, price in results['sell_signals_actual']:
+                actual_records.append({'日期': date.strftime('%Y-%m-%d'), '類型': '賣出', '股價': f"{price:.2f}"})
+            actual_records = sorted(actual_records, key=lambda x: x['日期'])
+            if actual_records:
+                df_actual = pd.DataFrame(actual_records)
+                st.table(df_actual)
+            else:
+                st.write("無實際 MACD 策略的買賣記錄可顯示。")
+
+            st.subheader("模型評估指標")
+            st.write(f"MAE: {results['mae']:.4f}")
+            st.write(f"RMSE: {results['rmse']:.4f}")
+            st.write(f"R²: {results['r2']:.4f}")
+            st.write(f"MAPE: {results['mape']:.2f}%")
+            st.write(f"總耗時: {results['elapsed_time']:.2f} 秒")
 
     elif mode == "預測模式":
         st.markdown("### 預測模式\n上載保存的模型和縮放器（.keras 格式），下載新數據並進行股價預測（包括未來 N 天）。")
