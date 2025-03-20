@@ -327,13 +327,15 @@ def main():
                 if 'Close' not in data.columns:
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
-                daily_returns = data['Close'].pct_change().dropna()  # 確保是 Series
+                
+                # 確保 daily_returns 是 pd.Series
                 try:
-                    if not isinstance(daily_returns, pd.Series):
-                        raise TypeError("daily_returns 不是 pd.Series")
+                    daily_returns = pd.Series(data['Close']).pct_change().dropna()
+                    if daily_returns.empty:
+                        raise ValueError("日收益率數據為空，無法計算統計特性")
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
-                    autocorrelation = daily_returns.autocorr()  # 使用 Series 的 autocorr 方法
+                    autocorrelation = daily_returns.autocorr()
                 except Exception as e:
                     volatility = mean_return = autocorrelation = "N/A"
                     st.warning(f"警告：無法計算統計特性，錯誤: {str(e)}")
