@@ -19,12 +19,10 @@ import io
 import os
 import tempfile
 
-# 顯示 TensorFlow 版本並加上當日美國時間
 eastern = pytz.timezone('US/Eastern')
 current_date = datetime.now(eastern)
 st.write(f"當前 TensorFlow 版本: {tf.__version__}，今日美國東部時間: {current_date.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-# 自訂 Attention 層
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -49,7 +47,6 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-# 構建模型函數
 def build_model(input_shape, model_type="original", learning_rate=0.001):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -71,7 +68,6 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
                       metrics=['mae'])
     return model
 
-# 數據預處理
 def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None, scaler_target=None, is_training=True):
     if data.empty:
         raise ValueError("輸入數據為空，無法進行預處理。請檢查數據來源或日期範圍。")
@@ -81,7 +77,8 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
     data = data.dropna()
 
     if len(data) < timesteps:
-        raise ValueError(f"數據樣本數 ({len(data)}) 小於時間步長 ({timesteps})，無法生成有效輸入。")
+        raise ValueError(f"數據樣本數 ({len(data)}) 小於時間步長 ({timesteps})，無法生成有效輸入。\n"
+                         f"請選擇更長的歷史數據年限（當前為 {len(data)} 個交易日），或減少時間步長（當前為 {timesteps}）。")
 
     features = ['Yesterday_Close', 'Open', 'High', 'Low', 'Average']
     target = 'Close'
@@ -120,12 +117,10 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
     else:
         return X, y, data.index[timesteps:], data
 
-# 預測函數
 @tf.function(reduce_retracing=True)
 def predict_step(model, x):
     return model(x, training=False)
 
-# 回測與交易策略
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -223,7 +218,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
-# 快取股票數據下載
 @st.cache_data
 def fetch_stock_data(stock_symbol, start_date, end_date):
     data = yf.download(stock_symbol, start=start_date, end=end_date)
@@ -232,7 +226,6 @@ def fetch_stock_data(stock_symbol, start_date, end_date):
         return None
     return data
 
-# 快取數據預處理
 @st.cache_data
 def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True):
     X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(
@@ -240,14 +233,12 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     )
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
-# 快取模型訓練
 @st.cache_resource
 def train_model(_model, X_train, y_train, epochs):
     history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
                          callbacks=[LambdaCallback(on_epoch_end=update_progress)])
     return _model, history.history
 
-# 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
     st.write(f"當前 Streamlit 版本: {st.__version__}")
@@ -330,6 +321,14 @@ def main():
                 status_text.text("步驟 1/5: 下載數據...")
                 data = fetch_stock_data(stock_symbol, data_start, data_end)
                 if data is None:
+                    return
+
+                data_temp = data.copy()
+                data_temp['Yesterday_Close'] = data_temp['Close'].shift(1)
+                data_temp = data_temp.dropna()
+                if len(data_temp) < timesteps:
+                    st.error(f"下載的數據樣本數 ({len(data_temp)}) 小於時間步長 ({timesteps})。\n"
+                             f"請選擇更長的歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）。")
                     return
 
                 actual_start_date = data.index[0].strftime('%Y-%m-%d')
