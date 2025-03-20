@@ -31,12 +31,14 @@ st.markdown("""
 - **還原狀態**：點擊「還原狀態」清除當前結果並重置進度。
 """)
 
+
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.W_h = self.add_weight(name='W_h', shape=(input_shape[-1], input_shape[-1]), initializer='random_normal', trainable=True)
+        self.W_h = self.add_weight(name='W_h', shape=(input_shape[-1], input_shape[-1]), initializer='random_normal',
+                                   trainable=True)
         self.b_h = self.add_weight(name='b_h', shape=(input_shape[-1],), initializer='zeros', trainable=True)
         self.W_a = self.add_weight(name='W_a', shape=(input_shape[-1], 1), initializer='random_normal', trainable=True)
         super(Attention, self).build(input_shape)
@@ -54,6 +56,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
+
 def build_model(input_shape, model_type="original", learning_rate=0.001):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -61,7 +64,8 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
         model.add(Dropout(0.01))
         model.add(Dense(32, activation='relu'))
         model.add(Dense(1))
-        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(),
+                      metrics=['mae'])
     else:
         inputs = Input(shape=input_shape)
         x = Conv1D(filters=128, kernel_size=1, activation='relu', padding='same')(inputs)
@@ -70,8 +74,10 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
         x = Attention()(x)
         outputs = Dense(1)(x)
         model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(), metrics=['mae'])
+        model.compile(optimizer=Adam(learning_rate=learning_rate), loss=tf.keras.losses.MeanSquaredError(),
+                      metrics=['mae'])
     return model
+
 
 def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None, scaler_target=None, is_training=True):
     if data.empty:
@@ -112,7 +118,7 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
     y = np.array(y)
 
     if is_training:
-        data_index = pd.to_datetime(data.index)
+        data_index = data.index  # 已經是帶時區的索引
         train_size = int(total_samples * train_split_ratio)
         test_size = total_samples - train_size
         X_train = X[:train_size]
@@ -122,11 +128,14 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
         test_dates = data_index[timesteps + train_size:timesteps + train_size + test_size]
         return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, data
     else:
-        return X, y, data.index[timesteps:], data
+        data_index = data.index  # 已經是帶時區的索引
+        return X, y, data_index[timesteps:], data
+
 
 @tf.function(reduce_retracing=True)
 def predict_step(model, x):
     return model(x, training=False)
+
 
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
@@ -140,8 +149,10 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     data['Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
 
     test_mask = data.index.isin(test_dates)
-    data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12, adjust=False).mean()
-    data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26, adjust=False).mean()
+    data.loc[test_mask, 'EMA12_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=12,
+                                                                                               adjust=False).mean()
+    data.loc[test_mask, 'EMA26_pred'] = pd.Series(predictions.flatten(), index=test_dates).ewm(span=26,
+                                                                                               adjust=False).mean()
     data['MACD_pred'] = data['EMA12_pred'] - data['EMA26_pred']
     data['Signal_pred'] = data['MACD_pred'].ewm(span=9, adjust=False).mean()
 
@@ -154,7 +165,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
     golden_cross = []
     death_cross = []
 
-    test_dates = pd.to_datetime(test_dates)
+    test_dates = test_dates  # 已經是帶時區的索引
     period_start = pd.to_datetime(period_start)
     period_end = pd.to_datetime(period_end)
 
@@ -195,7 +206,8 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
             sell_signals.append((data.index[i], close_price))
             st.write(f"止損賣出: {data.index[i]}, 價格: {close_price:.2f}")
 
-        elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred > signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] <= \
+                data['Signal_pred'].iloc[i - 1]:
             if position == 0:
                 shares = capital // close_price
                 capital -= shares * close_price
@@ -203,7 +215,8 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
                 buy_signals.append((data.index[i], close_price))
                 st.write(f"買入: {data.index[i]}, 價格: {close_price:.2f}")
 
-        elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= data['Signal_pred'].iloc[i - 1]:
+        elif macd_pred < signal_pred and i > test_start_idx and data['MACD_pred'].iloc[i - 1] >= \
+                data['Signal_pred'].iloc[i - 1]:
             if position == 1:
                 capital += shares * close_price
                 position = 0
@@ -221,13 +234,16 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
+
 @st.cache_data
 def fetch_stock_data(stock_symbol, start_date, end_date):
     data = yf.download(stock_symbol, start=start_date, end=end_date)
     if data.empty:
         st.error(f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
         return None
+    data.index = pd.to_datetime(data.index).tz_localize(eastern)
     return data
+
 
 @st.cache_data
 def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True):
@@ -236,9 +252,12 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     )
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
+
 def train_model(model, X_train, y_train, epochs, _callbacks=None):
-    history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=_callbacks)
+    history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
+                        callbacks=_callbacks)
     return model, history.history
+
 
 def main():
     st.title("股票價格預測與回測系統 BETA")
@@ -253,58 +272,63 @@ def main():
 
     if mode == "訓練模式":
         st.markdown("""
-        ### 訓練模式
-        輸入參數並訓練模型，生成預測和回測結果。訓練完成後可下載模型和縮放器。
-        """)
+            ### 訓練模式
+            輸入參數並訓練模型，生成預測和回測結果。訓練完成後可下載模型和縮放器。
+            """)
 
         stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL）", value="TSLA")
         timesteps = st.slider("選擇時間步長（歷史數據窗口天數）", min_value=10, max_value=100, value=30, step=10)
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型",
-                                ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
+                                  ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
 
-        data_years = st.selectbox("選擇歷史數據年限", [1, 2, 3], index=2, help="選擇要下載的歷史數據年限")
+        data_years = st.selectbox("選擇下載之歷史數據年限", [1, 2, 3], index=2,
+                                  help="從回測時段結束日期向前倒退的下載數據年限")
         train_test_split = st.selectbox("選擇訓練/測試數據分割比例",
-                                      ["80%訓練/20%測試", "70%訓練/30%測試"],
-                                      index=0,
-                                      help="選擇數據如何分配到訓練集和測試集")
+                                        ["80%訓練/20%測試", "70%訓練/30%測試"],
+                                        index=0,
+                                        help="選擇數據如何分配到訓練集和測試集")
         train_split_ratio = 0.8 if train_test_split.startswith("80%") else 0.7
 
         learning_rate_options = [1e-5, 1e-4, 5e-4, 1e-3, 5e-3]
         selected_learning_rate = st.selectbox(
             "選擇 Adam 學習率",
             options=learning_rate_options,
-            index=3,
+            index=3,  # 默認為 1e-3 (0.001)
             format_func=lambda x: f"{x:.5f}"
         )
 
         eastern = pytz.timezone('US/Eastern')
         current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = current_date - timedelta(days=365 * data_years)
-        periods = []
-        temp_end_date = current_date
 
-        while temp_end_date >= start_date:
-            period_start = temp_end_date - timedelta(days=179)
-            if period_start < start_date:
-                period_start = start_date
-            periods.append(f"{period_start.strftime('%Y-%m-%d')} to {temp_end_date.strftime('%Y-%m-%d')}")
-            temp_end_date = period_start - timedelta(days=1)
+        # 生成回測時段選項，從 current_date 向前回溯，每段約 6 個月
+        periods = []
+        end_base_date = current_date
+        start_base_date = eastern.localize(datetime(2022, 3, 21))
+        while end_base_date > start_base_date:
+            period_start = end_base_date - timedelta(days=179)  # 6 個月約 180 天
+            if period_start < start_base_date:
+                period_start = start_base_date
+            periods.append(f"{period_start.strftime('%Y-%m-%d')} to {end_base_date.strftime('%Y-%m-%d')}")
+            end_base_date = period_start - timedelta(days=1)
 
         if not periods:
             st.error("無法生成回測時段選項！請檢查日期範圍設置。")
             return
 
-        selected_period = st.selectbox("選擇回測時段（6個月，最近選擇年限內）", periods[::-1])
+        # 移除調試輸出，只保留功能性選項
+        period_options = periods[::-1]  # 從新到舊反轉為從舊到新
+        selected_period = st.selectbox("選擇回測時段（6個月）", period_options, index=len(period_options) - 1)  # 默認為最新時段
 
         if st.button("運行分析") and st.session_state['results'] is None:
             start_time = time.time()
 
             with st.spinner("正在下載數據並訓練模型，請等待..."):
                 period_start_str, period_end_str = selected_period.split(" to ")
-                period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
-                period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
-                data_start = start_date
+                period_start = eastern.localize(datetime.strptime(period_start_str, "%Y-%m-%d"))
+                period_end = eastern.localize(datetime.strptime(period_end_str, "%Y-%m-%d"))
+
+                data_start = period_end - timedelta(days=365 * data_years)
                 data_end = period_end + timedelta(days=1)
 
                 progress_bar = st.progress(0)
@@ -319,7 +343,7 @@ def main():
                 data_temp = data_temp.dropna()
                 if len(data_temp) < timesteps:
                     st.error(f"下載的數據樣本數 ({len(data_temp)}) 小於時間步長 ({timesteps})。\n"
-                             f"請選擇更長的歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）。")
+                             f"請選擇更長的下載歷史數據年限（當前為 {data_years} 年），或減少時間步長（當前為 {timesteps}）。")
                     return
 
                 actual_start_date = data.index[0].strftime('%Y-%m-%d')
@@ -329,8 +353,7 @@ def main():
                 if 'Close' not in data.columns:
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
-                
-                # 確保 daily_returns 是 1 維數據
+
                 try:
                     close_values = np.asarray(data['Close']).flatten()
                     close_series = pd.Series(close_values, index=data.index)
@@ -368,7 +391,8 @@ def main():
                 st.write(f"模型參數總數: {total_params:,}")
 
                 st.subheader("運算記錄")
-                st.write(f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
+                st.write(
+                    f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
                 st.write(f"實際已下載的數據範圍: {actual_start_date} to {actual_end_date}")
                 st.write(f"總共交易日: {total_trading_days}")
                 st.write(f"總樣本數: {total_samples}")
@@ -378,12 +402,16 @@ def main():
                 st.write(f"測試數據範圍: {test_date_range}")
                 mean_display = f"{mean_return:.6f}" if isinstance(mean_return, (int, float)) else mean_return
                 volatility_display = f"{volatility:.6f}" if isinstance(volatility, (int, float)) else volatility
-                autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
-                st.write(f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
+                autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation,
+                                                                                 (int, float)) else autocorrelation
+                st.write(
+                    f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
                 progress_per_epoch = 20 / epochs
+
                 def update_progress(epoch, logs):
-                    st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
+                    st.session_state['training_progress'] = min(60, st.session_state[
+                        'training_progress'] + progress_per_epoch)
                     progress_bar.progress(int(st.session_state['training_progress']))
                     status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
 
@@ -406,7 +434,7 @@ def main():
                 end_time = time.time()
                 elapsed_time = end_time - start_time
 
-                test_dates = pd.to_datetime(test_dates)
+                test_dates = test_dates  # 已經是帶時區的索引
                 period_start = pd.to_datetime(period_start)
                 period_end = pd.to_datetime(period_end)
                 mask = (test_dates >= period_start) & (test_dates <= period_end)
@@ -415,12 +443,16 @@ def main():
                 filtered_predictions = predictions[mask]
 
                 fig_price = go.Figure()
-                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
-                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines', name='Predicted Price'))
+                fig_price.add_trace(
+                    go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
+                fig_price.add_trace(go.Scatter(x=filtered_dates, y=filtered_predictions.flatten(), mode='lines',
+                                               name='Predicted Price'))
                 buy_x, buy_y = zip(*buy_signals) if buy_signals else ([], [])
                 sell_x, sell_y = zip(*sell_signals) if sell_signals else ([], [])
-                fig_price.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal', marker=dict(symbol='triangle-up', size=10, color='green')))
-                fig_price.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal', marker=dict(symbol='triangle-down', size=10, color='red')))
+                fig_price.add_trace(go.Scatter(x=buy_x, y=buy_y, mode='markers', name='Buy Signal',
+                                               marker=dict(symbol='triangle-up', size=10, color='green')))
+                fig_price.add_trace(go.Scatter(x=sell_x, y=sell_y, mode='markers', name='Sell Signal',
+                                               marker=dict(symbol='triangle-down', size=10, color='red')))
                 fig_price.update_layout(
                     title=f'{stock_symbol} Actual vs Predicted Prices ({selected_period})',
                     xaxis_title='Date',
@@ -438,11 +470,17 @@ def main():
                 golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
                 death_x, death_y = zip(*death_cross) if death_cross else ([], [])
                 fig_macd = go.Figure()
-                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines', name='MACD Line (Predicted)'))
-                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines', name='Signal Line (Predicted)'))
-                fig_macd.add_trace(go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines', name='Zero Line', line=dict(dash='dash')))
-                fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross', marker=dict(symbol='circle', size=10, color='green')))
-                fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross', marker=dict(symbol='circle', size=10, color='red')))
+                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['MACD_pred'], mode='lines',
+                                              name='MACD Line (Predicted)'))
+                fig_macd.add_trace(go.Scatter(x=data_backtest.index, y=data_backtest['Signal_pred'], mode='lines',
+                                              name='Signal Line (Predicted)'))
+                fig_macd.add_trace(
+                    go.Scatter(x=[data_backtest.index[0], data_backtest.index[-1]], y=[0, 0], mode='lines',
+                               name='Zero Line', line=dict(dash='dash')))
+                fig_macd.add_trace(go.Scatter(x=golden_x, y=golden_y, mode='markers', name='Golden Cross',
+                                              marker=dict(symbol='circle', size=10, color='green')))
+                fig_macd.add_trace(go.Scatter(x=death_x, y=death_y, mode='markers', name='Death Cross',
+                                              marker=dict(symbol='circle', size=10, color='red')))
                 fig_macd.update_layout(
                     title=f'{stock_symbol} MACD Analysis ({selected_period})',
                     xaxis_title='Date',
@@ -577,12 +615,17 @@ def main():
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
+                start_date = eastern.localize(datetime.combine(start_date, datetime.min.time()))
+                end_date = eastern.localize(datetime.combine(end_date, datetime.min.time()))
+
                 data = fetch_stock_data(stock_symbol, start_date, end_date)
                 if data is None:
                     return
 
                 try:
-                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features=scaler_features, scaler_target=scaler_target, is_training=False)
+                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps,
+                                                                         scaler_features=scaler_features,
+                                                                         scaler_target=scaler_target, is_training=False)
                 except ValueError as e:
                     st.error(str(e))
                     return
@@ -592,7 +635,7 @@ def main():
                 y_new = scaler_target.inverse_transform(y_new)
 
                 future_predictions = []
-                last_sequence = X_new[-1].copy()  # 複製最後一個序列
+                last_sequence = X_new[-1].copy()
                 last_close = float(full_data['Close'].iloc[-1])
                 last_open = float(full_data['Open'].iloc[-1])
                 last_high = float(full_data['High'].iloc[-1])
@@ -602,14 +645,13 @@ def main():
                     pred = predict_step(model, last_sequence[np.newaxis, :])
                     pred_price = scaler_target.inverse_transform(pred)[0, 0]
                     future_predictions.append(pred_price)
-                    # 更新特徵，使用預測價格作為下一次的 Average
                     new_features = [last_close, last_open, last_high, last_low, (last_high + last_low + pred_price) / 3]
                     scaled_new_features = scaler_features.transform([new_features])
                     last_sequence = np.roll(last_sequence, -1, axis=0)
-                    last_sequence[-1] = scaled_new_features[0]  # 確保是 1D 陣列
+                    last_sequence[-1] = scaled_new_features[0]
                     last_close = pred_price
 
-                future_dates = pd.date_range(start=end_date + timedelta(days=1), periods=future_days)
+                future_dates = pd.date_range(start=end_date + timedelta(days=1), periods=future_days, tz=eastern)
                 all_dates = np.concatenate([new_dates, future_dates])
                 all_predictions = np.concatenate([historical_predictions.flatten(), future_predictions])
 
@@ -618,7 +660,7 @@ def main():
                 fig.add_trace(go.Scatter(x=all_dates, y=all_predictions, mode='lines', name='Predicted Price'))
                 fig.add_vline(x=end_date, line_dash="dash", line_color="red", name="Prediction Start")
                 fig.update_layout(
-                    title=f'{stock_symbol} 預測結果 ({start_date} 至 {end_date} + 未來 {future_days} 天)',
+                    title=f'{stock_symbol} 預測結果 ({start_date.strftime("%Y-%m-%d")} 至 {end_date.strftime("%Y-%m-%d")} + 未來 {future_days} 天)',
                     xaxis_title='Date',
                     yaxis_title='Price',
                     height=600,
@@ -646,6 +688,7 @@ def main():
             del st.session_state['results']
         st.session_state['training_progress'] = 40
         st.rerun()
+
 
 if __name__ == "__main__":
     main()
