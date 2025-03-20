@@ -23,6 +23,14 @@ eastern = pytz.timezone('US/Eastern')
 current_date = datetime.now(eastern)
 st.write(f"當前 TensorFlow 版本: {tf.__version__}，今日美國東部時間: {current_date.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
+# 使用說明
+st.markdown("""
+### 使用說明
+- **訓練模式**：選擇「訓練模式」，輸入股票代碼、時間步長、次數等參數，然後點擊「運行分析」訓練模型並生成預測與回測結果。訓練完成後可下載模型和縮放器。
+- **預測模式**：選擇「預測模式」，上載之前訓練好的模型和縮放器文件，輸入股票代碼與日期範圍，點擊「運行預測」生成歷史與未來價格預測。
+- **還原狀態**：點擊「還原狀態」清除當前結果並重置進度。
+""")
+
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -227,8 +235,8 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
 @st.cache_resource
-def train_model(_model, X_train, y_train, epochs):
-    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1)
+def train_model(_model, X_train, y_train, epochs, callbacks=None):
+    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=callbacks)
     return _model, history.history
 
 def main():
@@ -347,10 +355,9 @@ def main():
                 model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected,
                                     learning_rate=selected_learning_rate)
 
-                st.write("模型結構：")
-                model_summary = io.StringIO()
-                model.summary(print_fn=lambda x: model_summary.write(x + '\n'))
-                st.text(model_summary.getvalue())
+                # 只顯示參數總數
+                total_params = model.count_params()
+                st.write(f"模型參數總數: {total_params:,}")
 
                 st.subheader("運算記錄")
                 st.write(f"正在下載的股票歷史數據日期範圍: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
@@ -373,9 +380,9 @@ def main():
                     progress_bar.progress(int(st.session_state['training_progress']))
                     status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
 
-                # 使用回調進行訓練
-                callback = LambdaCallback(on_epoch_end=update_progress)
-                model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[callback])
+                # 使用 train_model 進行訓練
+                callback = [LambdaCallback(on_epoch_end=update_progress)]
+                model, history = train_model(model, X_train, y_train, epochs, callbacks=callback)
 
                 progress_bar.progress(60)
                 status_text.text("步驟 4/5: 進行價格預測...")
