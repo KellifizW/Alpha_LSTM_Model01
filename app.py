@@ -71,7 +71,7 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
                       metrics=['mae'])
     return model
 
-# 數據預處理（修改以接受自訂分割比例）
+# 數據預處理
 def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None, scaler_target=None, is_training=True):
     if data.empty:
         raise ValueError("輸入數據為空，無法進行預處理。請檢查數據來源或日期範圍。")
@@ -109,7 +109,7 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
 
     if is_training:
         data_index = pd.to_datetime(data.index)
-        train_size = int(total_samples * train_split_ratio)  # 使用自訂的分割比例
+        train_size = int(total_samples * train_split_ratio)
         test_size = total_samples - train_size
         X_train = X[:train_size]
         y_train = y[:train_size]
@@ -223,6 +223,30 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
+# 快取股票數據下載
+@st.cache_data
+def fetch_stock_data(stock_symbol, start_date, end_date):
+    data = yf.download(stock_symbol, start=start_date, end=end_date)
+    if data.empty:
+        st.error(f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
+        return None
+    return data
+
+# 快取數據預處理
+@st.cache_data
+def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True):
+    X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(
+        data, timesteps, train_split_ratio=train_split_ratio, is_training=is_training
+    )
+    return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
+
+# 快取模型訓練
+@st.cache_resource
+def train_model(_model, X_train, y_train, epochs):
+    history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
+                         callbacks=[LambdaCallback(on_epoch_end=update_progress)])
+    return _model, history.history
+
 # 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
@@ -247,10 +271,7 @@ def main():
         model_type = st.selectbox("選擇模型類型",
                                 ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
 
-        # 新增歷史數據年限選擇
         data_years = st.selectbox("選擇歷史數據年限", [1, 2, 3], index=2, help="選擇要下載的歷史數據年限")
-        
-        # 新增訓練/測試分割比例選擇
         train_test_split = st.selectbox("選擇訓練/測試數據分割比例",
                                       ["80%訓練/20%測試", "70%訓練/30%測試"],
                                       index=0,
@@ -267,7 +288,7 @@ def main():
 
         eastern = pytz.timezone('US/Eastern')
         current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = current_date - timedelta(days=365 * data_years)  # 根據選擇的年限計算開始日期
+        start_date = current_date - timedelta(days=365 * data_years)
         periods = []
         temp_end_date = current_date
 
@@ -291,7 +312,7 @@ def main():
                 period_start_str, period_end_str = selected_period.split(" to ")
                 period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
                 period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
-                data_start = start_date  # 使用選擇的年限作為數據開始日期
+                data_start = start_date
                 data_end = period_end + timedelta(days=1)
 
                 ticker = yf.Ticker(stock_symbol)
@@ -307,17 +328,14 @@ def main():
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 status_text.text("步驟 1/5: 下載數據...")
-                data = yf.download(stock_symbol, start=data_start, end=data_end)
-
-                if data.empty:
-                    st.error("無法獲取此代碼的數據。請檢查股票代碼或時段！")
+                data = fetch_stock_data(stock_symbol, data_start, data_end)
+                if data is None:
                     return
 
                 actual_start_date = data.index[0].strftime('%Y-%m-%d')
                 actual_end_date = data.index[-1].strftime('%Y-%m-%d')
                 total_trading_days = len(data)
 
-                st.write(f"調試信息 - data 列名: {data.columns.tolist()}")
                 if 'Close' not in data.columns:
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
@@ -332,8 +350,9 @@ def main():
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
-                X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(
-                    data, timesteps, train_split_ratio=train_split_ratio, is_training=True)
+                X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = cached_preprocess_data(
+                    data, timesteps, train_split_ratio, is_training=True
+                )
 
                 total_samples = len(X_train) + len(X_test)
                 train_samples = len(X_train)
@@ -377,9 +396,7 @@ def main():
                     progress_bar.progress(int(st.session_state['training_progress']))
                     status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
 
-                epoch_callback = LambdaCallback(on_epoch_end=update_progress)
-                history = model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
-                                    callbacks=[epoch_callback])
+                model, history = train_model(model, X_train, y_train, epochs)
 
                 progress_bar.progress(60)
                 status_text.text("步驟 4/5: 進行價格預測...")
@@ -405,7 +422,6 @@ def main():
                 filtered_y_test = y_test[mask]
                 filtered_predictions = predictions[mask]
 
-                # 生成價格圖表
                 fig_price = go.Figure()
                 fig_price.add_trace(
                     go.Scatter(x=filtered_dates, y=filtered_y_test.flatten(), mode='lines', name='Actual Price'))
@@ -425,13 +441,11 @@ def main():
                     width=1000
                 )
 
-                # 生成損失圖表
                 fig_loss = go.Figure()
-                fig_loss.add_trace(go.Scatter(y=history.history['loss'], mode='lines', name='Training Loss'))
-                fig_loss.add_trace(go.Scatter(y=history.history['val_loss'], mode='lines', name='Validation Loss'))
+                fig_loss.add_trace(go.Scatter(y=history['loss'], mode='lines', name='Training Loss'))
+                fig_loss.add_trace(go.Scatter(y=history['val_loss'], mode='lines', name='Validation Loss'))
                 fig_loss.update_layout(title='訓練與驗證損失曲線', xaxis_title='Epoch', yaxis_title='Loss')
 
-                # 生成MACD圖表
                 data_backtest = full_data.loc[period_start:period_end].copy()
                 golden_x, golden_y = zip(*golden_cross) if golden_cross else ([], [])
                 death_x, death_y = zip(*death_cross) if death_cross else ([], [])
@@ -455,7 +469,6 @@ def main():
                     width=1000
                 )
 
-                # 計算評估指標
                 mae = mean_absolute_error(filtered_y_test, filtered_predictions)
                 rmse = np.sqrt(mean_squared_error(filtered_y_test, filtered_predictions))
                 r2 = r2_score(filtered_y_test, filtered_predictions)
@@ -481,7 +494,7 @@ def main():
                     'elapsed_time': elapsed_time,
                     'stock_symbol': stock_symbol,
                     'selected_period': selected_period,
-                    'history': history.history
+                    'history': history
                 }
 
         if st.session_state['results'] is not None:
@@ -582,10 +595,8 @@ def main():
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
-                data = yf.download(stock_symbol, start=start_date, end=end_date)
-                if data.empty:
-                    st.error(
-                        f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
+                data = fetch_stock_data(stock_symbol, start_date, end_date)
+                if data is None:
                     return
 
                 try:
@@ -655,7 +666,8 @@ def main():
                     st.write(f"日期: {date.strftime('%Y-%m-%d')}，預測價格: {price:.2f}")
 
     if st.button("還原狀態"):
-        st.session_state['results'] = None
+        if 'results' in st.session_state:
+            del st.session_state['results']
         st.session_state['training_progress'] = 40
         st.rerun()
 
