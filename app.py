@@ -94,6 +94,8 @@ def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None
         scaled_features = scaler_features.fit_transform(data[features])
         scaled_target = scaler_target.fit_transform(data[[target]])
     else:
+        if scaler_features is None or scaler_target is None:
+            raise ValueError("預測模式需要提供訓練時的 scaler_features 和 scaler_target。")
         scaled_features = scaler_features.transform(data[features])
         scaled_target = scaler_target.transform(data[[target]])
 
@@ -330,14 +332,11 @@ def main():
                 
                 # 確保 daily_returns 是 1 維數據
                 try:
-                    # 提取 'Close' 列並轉為 1 維 NumPy 陣列
                     close_values = np.asarray(data['Close']).flatten()
-                    # 轉為 pd.Series 並計算日收益率
                     close_series = pd.Series(close_values, index=data.index)
                     daily_returns = close_series.pct_change().dropna()
                     if daily_returns.empty:
                         raise ValueError("日收益率數據為空，無法計算統計特性")
-                    # 確保 daily_returns 是 1 維
                     if daily_returns.ndim > 1:
                         daily_returns = daily_returns.squeeze()
                     volatility = daily_returns.std()
@@ -365,7 +364,6 @@ def main():
                 model = build_model(input_shape=(timesteps, X_train.shape[2]), model_type=model_type_selected,
                                     learning_rate=selected_learning_rate)
 
-                # 只顯示參數總數
                 total_params = model.count_params()
                 st.write(f"模型參數總數: {total_params:,}")
 
@@ -383,14 +381,12 @@ def main():
                 autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
                 st.write(f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
-                # 定義進度更新回調
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
                     st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
                     progress_bar.progress(int(st.session_state['training_progress']))
                     status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
 
-                # 使用 train_model 進行訓練
                 callback = [LambdaCallback(on_epoch_end=update_progress)]
                 model, history = train_model(model, X_train, y_train, epochs, _callbacks=callback)
 
@@ -586,7 +582,7 @@ def main():
                     return
 
                 try:
-                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features, scaler_target, is_training=False)
+                    X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features=scaler_features, scaler_target=scaler_target, is_training=False)
                 except ValueError as e:
                     st.error(str(e))
                     return
@@ -596,7 +592,7 @@ def main():
                 y_new = scaler_target.inverse_transform(y_new)
 
                 future_predictions = []
-                last_sequence = X_new[-1]
+                last_sequence = X_new[-1].copy()  # 複製最後一個序列
                 last_close = float(full_data['Close'].iloc[-1])
                 last_open = float(full_data['Open'].iloc[-1])
                 last_high = float(full_data['High'].iloc[-1])
@@ -606,10 +602,11 @@ def main():
                     pred = predict_step(model, last_sequence[np.newaxis, :])
                     pred_price = scaler_target.inverse_transform(pred)[0, 0]
                     future_predictions.append(pred_price)
-                    new_features = [last_close, last_open, last_high, last_low, pred_price]
-                    scaled_new_features = scaler_features.transform([new_features])[0]
+                    # 更新特徵，使用預測價格作為下一次的 Average
+                    new_features = [last_close, last_open, last_high, last_low, (last_high + last_low + pred_price) / 3]
+                    scaled_new_features = scaler_features.transform([new_features])
                     last_sequence = np.roll(last_sequence, -1, axis=0)
-                    last_sequence[-1] = scaled_new_features
+                    last_sequence[-1] = scaled_new_features[0]  # 確保是 1D 陣列
                     last_close = pred_price
 
                 future_dates = pd.date_range(start=end_date + timedelta(days=1), periods=future_days)
