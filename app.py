@@ -509,9 +509,11 @@ def main():
                     is_training=False
                 )
                 predictions = predict_step(model, X_test)
-                # 插入的驗證代碼：計算預測值與 y_current_test 和 y_test 的 MAE
-                print(f"MAE with y_current: {mean_absolute_error(y_current_test, predictions)}")
-                print(f"MAE with y: {mean_absolute_error(y_test, predictions)}")
+                # 將 TensorFlow 張量轉換為 NumPy 陣列
+                predictions_np = predictions.numpy()  # 將 tf.Tensor 轉為 numpy.ndarray
+                # 計算 MAE
+                print(f"MAE with y_current: {mean_absolute_error(y_current_test, predictions_np)}")
+                print(f"MAE with y: {mean_absolute_error(y_test, predictions_np)}")
                 # 繼續反向縮放
                 predictions = scaler_target.inverse_transform(predictions)
                 y_current_test = scaler_target.inverse_transform(y_current_test)
