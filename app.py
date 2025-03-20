@@ -24,8 +24,7 @@ eastern = pytz.timezone('US/Eastern')
 current_date = datetime.now(eastern)
 st.write(f"當前 TensorFlow 版本: {tf.__version__}，今日美國東部時間: {current_date.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-
-# 自訂 Attention 層（保持不變）
+# 自訂 Attention 層
 class Attention(Layer):
     def __init__(self, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -50,8 +49,7 @@ class Attention(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[-1])
 
-
-# 構建模型函數（修正為接受 learning_rate）
+# 構建模型函數
 def build_model(input_shape, model_type="original", learning_rate=0.001):
     if model_type == "lstm_simple":
         model = Sequential()
@@ -73,9 +71,8 @@ def build_model(input_shape, model_type="original", learning_rate=0.001):
                       metrics=['mae'])
     return model
 
-
-# 數據預處理（保持不變）
-def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, is_training=True):
+# 數據預處理（修改以接受自訂分割比例）
+def preprocess_data(data, timesteps, train_split_ratio=0.7, scaler_features=None, scaler_target=None, is_training=True):
     if data.empty:
         raise ValueError("輸入數據為空，無法進行預處理。請檢查數據來源或日期範圍。")
 
@@ -112,7 +109,7 @@ def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, i
 
     if is_training:
         data_index = pd.to_datetime(data.index)
-        train_size = int(total_samples * 0.7)
+        train_size = int(total_samples * train_split_ratio)  # 使用自訂的分割比例
         test_size = total_samples - train_size
         X_train = X[:train_size]
         y_train = y[:train_size]
@@ -123,14 +120,12 @@ def preprocess_data(data, timesteps, scaler_features=None, scaler_target=None, i
     else:
         return X, y, data.index[timesteps:], data
 
-
 # 預測函數
 @tf.function(reduce_retracing=True)
 def predict_step(model, x):
     return model(x, training=False)
 
-
-# 回測與交易策略（保持不變）
+# 回測與交易策略
 def backtest(data, predictions, test_dates, period_start, period_end, initial_capital=100000):
     data = data.copy()
     test_size = len(predictions)
@@ -228,8 +223,6 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
     return data, capital_values, total_return, max_return, min_return, buy_signals, sell_signals, golden_cross, death_cross
 
-
-# 主程式
 # 主程式
 def main():
     st.title("股票價格預測與回測系統 BETA")
@@ -252,20 +245,29 @@ def main():
         timesteps = st.slider("選擇時間步長（歷史數據窗口天數）", min_value=10, max_value=100, value=30, step=10)
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型",
-                                  ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
+                                ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
+
+        # 新增歷史數據年限選擇
+        data_years = st.selectbox("選擇歷史數據年限", [1, 2, 3], index=2, help="選擇要下載的歷史數據年限")
+        
+        # 新增訓練/測試分割比例選擇
+        train_test_split = st.selectbox("選擇訓練/測試數據分割比例",
+                                      ["80%訓練/20%測試", "70%訓練/30%測試"],
+                                      index=0,
+                                      help="選擇數據如何分配到訓練集和測試集")
+        train_split_ratio = 0.8 if train_test_split.startswith("80%") else 0.7
 
         learning_rate_options = [1e-5, 1e-4, 5e-4, 1e-3, 5e-3]
         selected_learning_rate = st.selectbox(
             "選擇 Adam 學習率",
             options=learning_rate_options,
             index=3,
-            format_func=lambda x: f"{x:.5f}",
-            help="選擇 Adam 優化器的學習率，影響模型訓練速度和收斂性。"
+            format_func=lambda x: f"{x:.5f}"
         )
 
         eastern = pytz.timezone('US/Eastern')
         current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = current_date - timedelta(days=1095)
+        start_date = current_date - timedelta(days=365 * data_years)  # 根據選擇的年限計算開始日期
         periods = []
         temp_end_date = current_date
 
@@ -280,7 +282,7 @@ def main():
             st.error("無法生成回測時段選項！請檢查日期範圍設置。")
             return
 
-        selected_period = st.selectbox("選擇回測時段（6個月，最近 3 年）", periods[::-1])
+        selected_period = st.selectbox("選擇回測時段（6個月，最近選擇年限內）", periods[::-1])
 
         if st.button("運行分析") and st.session_state['results'] is None:
             start_time = time.time()
@@ -289,7 +291,7 @@ def main():
                 period_start_str, period_end_str = selected_period.split(" to ")
                 period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
                 period_end = datetime.strptime(period_end_str, "%Y-%m-%d")
-                data_start = period_start - timedelta(days=1095)
+                data_start = start_date  # 使用選擇的年限作為數據開始日期
                 data_end = period_end + timedelta(days=1)
 
                 ticker = yf.Ticker(stock_symbol)
@@ -315,27 +317,23 @@ def main():
                 actual_end_date = data.index[-1].strftime('%Y-%m-%d')
                 total_trading_days = len(data)
 
-                # 計算數據統計特性（修復）
                 st.write(f"調試信息 - data 列名: {data.columns.tolist()}")
-                if ('Close', stock_symbol) not in data.columns:
-                    st.error(
-                        f"數據中缺少 ('Close', '{stock_symbol}') 列，無法計算統計特性。數據列: {data.columns.tolist()}")
+                if 'Close' not in data.columns:
+                    st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
-                daily_returns = data[('Close', stock_symbol)].pct_change().dropna()
-                st.write(f"調試信息 - daily_returns 類型: {type(daily_returns)}, 長度: {len(daily_returns)}")
-                st.write(f"調試信息 - daily_returns 前5行: {daily_returns.head().tolist()}")
+                daily_returns = data['Close'].pct_change().dropna()
                 try:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
                     autocorrelation = daily_returns.autocorr()
                 except Exception as e:
                     volatility = mean_return = autocorrelation = "N/A"
-                    st.warning(f"警告：無法計算統計特性，錯誤: {str(e)} (daily_returns 長度: {len(daily_returns)})")
+                    st.warning(f"警告：無法計算統計特性，錯誤: {str(e)}")
 
                 progress_bar.progress(20)
                 status_text.text("步驟 2/5: 預處理數據...")
                 X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data = preprocess_data(
-                    data, timesteps, is_training=True)
+                    data, timesteps, train_split_ratio=train_split_ratio, is_training=True)
 
                 total_samples = len(X_train) + len(X_test)
                 train_samples = len(X_train)
@@ -561,7 +559,7 @@ def main():
         default_end_date = current_date - timedelta(days=1)
         start_date = st.date_input("選擇歷史數據開始日期", value=default_start_date, max_value=current_date)
         end_date = st.date_input("選擇歷史數據結束日期", value=default_end_date, max_value=current_date)
-        future_days = st.selectbox("選擇未來預測天數", [1, 5], index=0)  # 用戶選擇 1 天或 5 天
+        future_days = st.selectbox("選擇未來預測天數", [1, 5], index=0)
 
         model_file = st.file_uploader("上載模型文件 (.keras)", type=["keras"])
         scaler_features_file = st.file_uploader("上載特徵縮放器 (.pkl)", type=["pkl"])
@@ -569,7 +567,6 @@ def main():
 
         if st.button("運行預測") and model_file and scaler_features_file and scaler_target_file:
             with st.spinner("正在載入模型並預測（包括未來預測）..."):
-                # 載入模型
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".keras") as tmp_model:
                     tmp_model.write(model_file.read())
                     tmp_model_path = tmp_model.name
@@ -582,18 +579,15 @@ def main():
                 model = load_model(tmp_model_path, custom_objects=custom_objects)
                 os.unlink(tmp_model_path)
 
-                # 載入縮放器
                 scaler_features = pickle.load(scaler_features_file)
                 scaler_target = pickle.load(scaler_target_file)
 
-                # 下載歷史數據
                 data = yf.download(stock_symbol, start=start_date, end=end_date)
                 if data.empty:
                     st.error(
                         f"無法下載 {stock_symbol} 的數據（{start_date} 至 {end_date}）。請檢查股票代碼或日期範圍是否有效！")
                     return
 
-                # 預處理歷史數據
                 try:
                     X_new, y_new, new_dates, full_data = preprocess_data(data, timesteps, scaler_features,
                                                                          scaler_target, is_training=False)
@@ -601,15 +595,12 @@ def main():
                     st.error(str(e))
                     return
 
-                # 預測歷史數據
                 historical_predictions = predict_step(model, X_new)
                 historical_predictions = scaler_target.inverse_transform(historical_predictions)
                 y_new = scaler_target.inverse_transform(y_new)
 
-                # 未來預測
                 future_predictions = []
-                last_sequence = X_new[-1]  # 最後一個歷史序列
-                # 提取最後一天的純量值
+                last_sequence = X_new[-1]
                 last_close = float(full_data['Close'].iloc[-1])
                 last_open = float(full_data['Open'].iloc[-1])
                 last_high = float(full_data['High'].iloc[-1])
@@ -619,27 +610,22 @@ def main():
                     pred = predict_step(model, last_sequence[np.newaxis, :])
                     pred_price = scaler_target.inverse_transform(pred)[0, 0]
                     future_predictions.append(pred_price)
-                    # 構造新特徵，使用純量
                     new_features = [
-                        last_close,  # Yesterday_Close
-                        last_open,  # Open（假設與最後一天相同）
-                        last_high,  # High（假設與最後一天相同）
-                        last_low,  # Low（假設與最後一天相同）
-                        pred_price  # Average（使用預測的 Close）
+                        last_close,
+                        last_open,
+                        last_high,
+                        last_low,
+                        pred_price
                     ]
                     scaled_new_features = scaler_features.transform([new_features])[0]
-                    # 更新序列
                     last_sequence = np.roll(last_sequence, -1, axis=0)
                     last_sequence[-1] = scaled_new_features
-                    # 更新 last_close 為下一輪的 Yesterday_Close
                     last_close = pred_price
 
-                # 合併歷史和未來數據
                 future_dates = pd.date_range(start=end_date + timedelta(days=1), periods=future_days)
                 all_dates = np.concatenate([new_dates, future_dates])
                 all_predictions = np.concatenate([historical_predictions.flatten(), future_predictions])
 
-                # 顯示結果
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=new_dates, y=y_new.flatten(), mode='lines', name='Actual Price'))
                 fig.add_trace(go.Scatter(x=all_dates, y=all_predictions, mode='lines', name='Predicted Price'))
@@ -653,7 +639,6 @@ def main():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                # 顯示歷史數據的評估指標
                 if len(y_new) > 0:
                     mae = mean_absolute_error(y_new, historical_predictions)
                     rmse = np.sqrt(mean_squared_error(y_new, historical_predictions))
@@ -669,12 +654,10 @@ def main():
                 for i, (date, price) in enumerate(zip(future_dates, future_predictions)):
                     st.write(f"日期: {date.strftime('%Y-%m-%d')}，預測價格: {price:.2f}")
 
-    # 還原狀態
     if st.button("還原狀態"):
         st.session_state['results'] = None
         st.session_state['training_progress'] = 40
         st.rerun()
-
 
 if __name__ == "__main__":
     main()
