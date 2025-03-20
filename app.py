@@ -320,7 +320,7 @@ def main():
                 if 'Close' not in data.columns:
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
-                daily_returns = data['Close'].pct_change().dropna()
+                daily_returns = data['Close'].pct_change().dropna()  # 確保是 Series
                 try:
                     volatility = daily_returns.std()
                     mean_return = daily_returns.mean()
@@ -366,13 +366,14 @@ def main():
                 autocorrelation_display = f"{autocorrelation:.6f}" if isinstance(autocorrelation, (int, float)) else autocorrelation
                 st.write(f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
+                # 定義進度更新回調
                 progress_per_epoch = 20 / epochs
                 def update_progress(epoch, logs):
                     st.session_state['training_progress'] = min(60, st.session_state['training_progress'] + progress_per_epoch)
                     progress_bar.progress(int(st.session_state['training_progress']))
                     status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
 
-                model, history = train_model(model, X_train, y_train, epochs)
+                # 使用回調進行訓練
                 callback = LambdaCallback(on_epoch_end=update_progress)
                 model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1, callbacks=[callback])
 
