@@ -328,9 +328,11 @@ def main():
                     st.error(f"數據中缺少 'Close' 列，無法計算統計特性。數據列: {data.columns.tolist()}")
                     return
                 
-                # 確保 daily_returns 是 pd.Series
+                # 確保 daily_returns 是 1 維的 pd.Series
                 try:
-                    daily_returns = pd.Series(data['Close']).pct_change().dropna()
+                    # 將 'Close' 列轉換為 pd.Series，並計算日收益率
+                    close_series = pd.Series(data['Close'].values, index=data.index)
+                    daily_returns = close_series.pct_change().dropna()
                     if daily_returns.empty:
                         raise ValueError("日收益率數據為空，無法計算統計特性")
                     volatility = daily_returns.std()
