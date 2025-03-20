@@ -179,7 +179,7 @@ def backtest(data, predictions, test_dates, period_start, period_end, initial_ca
 
         if i > test_start_idx:
             if pd.notna(macd_pred) and pd.notna(signal_pred):
-                prev_macd = data niks['MACD_pred'].iloc[i - 1]
+                prev_macd = data['MACD_pred'].iloc[i - 1]
                 prev_signal = data['Signal_pred'].iloc[i - 1]
                 if macd_pred > signal_pred and prev_macd <= prev_signal:
                     golden_cross.append((data.index[i], macd_pred))
