@@ -233,10 +233,19 @@ def cached_preprocess_data(data, timesteps, train_split_ratio, is_training=True)
     )
     return X_train, X_test, y_train, y_test, scaler_features, scaler_target, test_dates, full_data
 
+# 將 update_progress 移到全域，並接受進度條和狀態文字作為參數
+def update_progress(epoch, logs, progress_bar, status_text, epochs, training_progress):
+    training_progress = min(60, training_progress + 20 / epochs)
+    progress_bar.progress(int(training_progress))
+    status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
+    return training_progress
+
 @st.cache_resource
-def train_model(_model, X_train, y_train, epochs):
+def train_model(_model, X_train, y_train, epochs, progress_bar, status_text):
+    training_progress = st.session_state['training_progress']
+    callback = LambdaCallback(on_epoch_end=lambda epoch, logs: update_progress(epoch, logs, progress_bar, status_text, epochs, training_progress))
     history = _model.fit(X_train, y_train, epochs=epochs, batch_size=256, validation_split=0.1, verbose=1,
-                         callbacks=[LambdaCallback(on_epoch_end=update_progress)])
+                         callbacks=[callback])
     return _model, history.history
 
 def main():
@@ -387,15 +396,7 @@ def main():
                 st.write(
                     f"數據統計特性 - 日收益率均值: {mean_display}, 波動率: {volatility_display}, 自相關係數: {autocorrelation_display}")
 
-                progress_per_epoch = 20 / epochs
-
-                def update_progress(epoch, logs):
-                    st.session_state['training_progress'] = min(60, st.session_state[
-                        'training_progress'] + progress_per_epoch)
-                    progress_bar.progress(int(st.session_state['training_progress']))
-                    status_text.text(f"步驟 3/5: 訓練模型 - Epoch {epoch + 1}/{epochs} (損失: {logs.get('loss'):.4f})")
-
-                model, history = train_model(model, X_train, y_train, epochs)
+                model, history = train_model(model, X_train, y_train, epochs, progress_bar, status_text)
 
                 progress_bar.progress(60)
                 status_text.text("步驟 4/5: 進行價格預測...")
