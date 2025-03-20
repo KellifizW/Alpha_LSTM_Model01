@@ -388,7 +388,7 @@ def main():
         timesteps = st.slider("選擇時間步長（歷史數據窗口天數）", min_value=10, max_value=100, value=30, step=10)
         epochs = st.slider("選擇訓練次數（epochs）", min_value=50, max_value=200, value=200, step=50)
         model_type = st.selectbox("選擇模型類型", ["original (CNN-BiLSTM-Attention)", "lstm_simple (單層LSTM 150神經元)"], index=0)
-        predict_days = st.selectbox("選擇預測天數（預測未來幾天的收盤價）", [1, 5], index=1)
+        predict_days = st.selectbox("選擇預測天數（預測未來幾天的收盤價）", [1, 3, 5, 7], index=1)
         data_years = st.selectbox("選擇下載之歷史數據年限", [1, 2, 3], index=2, help="從回測時段結束日期向前倒退的下載數據年限")
         train_test_split = st.selectbox("選擇訓練/測試數據分割比例", ["80%訓練/20%測試", "70%訓練/30%測試"], index=0)
         train_split_ratio = 0.8 if train_test_split.startswith("80%") else 0.7
@@ -509,6 +509,10 @@ def main():
                     is_training=False
                 )
                 predictions = predict_step(model, X_test)
+                # 插入的驗證代碼：計算預測值與 y_current_test 和 y_test 的 MAE
+                print(f"MAE with y_current: {mean_absolute_error(y_current_test, predictions)}")
+                print(f"MAE with y: {mean_absolute_error(y_test, predictions)}")
+                # 繼續反向縮放
                 predictions = scaler_target.inverse_transform(predictions)
                 y_current_test = scaler_target.inverse_transform(y_current_test)
                 progress_bar.progress(80)
@@ -762,7 +766,7 @@ def main():
         st.markdown("### 預測模式\n上載保存的模型和縮放器（.keras 格式），下載新數據並進行股價預測（包括未來 N 天）。")
         stock_symbol = st.text_input("輸入股票代碼（例如：TSLA, AAPL）", value="TSLA")
         timesteps = st.slider("選擇時間步長（需與訓練時一致）", min_value=10, max_value=100, value=30, step=10)
-        predict_days = st.selectbox("選擇預測天數（需與訓練時一致）", [1, 5], index=1)
+        predict_days = st.selectbox("選擇預測天數（需與訓練時一致）", [1, 3, 5, 7], index=1)
         eastern = pytz.timezone('US/Eastern')
         current_date = datetime.now(eastern).replace(hour=0, minute=0, second=0, microsecond=0)
         default_start_date = current_date - timedelta(days=90)
