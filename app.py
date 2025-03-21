@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -507,10 +506,12 @@ def main():
                 )
                 predictions = predict_step(model, X_test)
                 predictions_np = predictions.numpy()
-                st.write(f"MAE with y_current: {mean_absolute_error(y_current_test, predictions_np)}")
-                st.write(f"MAE with y: {mean_absolute_error(y_test, predictions_np)}")
-                predictions = scaler_target.inverse_transform(predictions)
-                y_current_test = scaler_target.inverse_transform(y_current_test)
+                y_test_np = y_test
+                y_current_test_np = y_current_test
+                st.write(f"MAE with y_current: {mean_absolute_error(y_current_test_np, predictions_np)}")
+                st.write(f"MAE with y: {mean_absolute_error(y_test_np, predictions_np)}")
+                predictions = scaler_target.inverse_transform(predictions_np)
+                y_current_test = scaler_target.inverse_transform(y_current_test_np)
                 progress_bar.progress(80)
                 status_text.text("步驟 5/5: 執行回測...")
                 result = backtest(full_data, predictions, test_dates, period_start, period_end)
@@ -837,4 +838,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
