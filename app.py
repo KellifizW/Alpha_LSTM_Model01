@@ -117,6 +117,7 @@ def preprocess_data(data, timesteps, predict_days=1, train_split_ratio=0.7, scal
         y_test = y[train_size:]
         y_current_train = y_current[:train_size]
         y_current_test = y_current[train_size:]
+        # 調整 test_dates 計算方式，確保包含最後的日期
         test_dates = data_index[timesteps + train_size - 1 + predict_days:timesteps + train_size + test_size + predict_days - 1]
         return X_train, X_test, y_train, y_test, y_current_train, y_current_test, scaler_features, scaler_target, test_dates, data
     else:
@@ -247,7 +248,8 @@ def train_model(model, X_train, y_train, epochs, _callbacks=None):
     return model, history.history
 
 def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_symbol, title, buy_signals_pred=None, sell_signals_pred=None, buy_signals_actual=None, sell_signals_actual=None):
-    valid_mask = ~np.isnan(actual_prices)
+    # 過濾掉 NaN 值，只保留有數據的交易日
+    valid_mask = ~np.isnan(actual_prices)  # 假設 actual_prices 和 predicted_prices 的 NaN 位置一致
     valid_dates = dates[valid_mask]
     valid_actual_prices = actual_prices[valid_mask]
     valid_predicted_prices = predicted_prices[valid_mask]
@@ -256,6 +258,7 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
         st.error("數據長度為0，無法繪製圖表！請檢查數據過濾或預測過程。")
         return go.Figure()
 
+    # 將日期轉換為字符串格式
     date_labels = [pd.Timestamp(d).strftime('%Y-%m-%d') if isinstance(d, (pd.Timestamp, datetime)) else d for d in valid_dates]
 
     fig = go.Figure()
@@ -314,7 +317,8 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
             marker=dict(symbol='triangle-down', size=10, color='darkred')
         ))
 
-    tick_indices = np.arange(0, len(valid_dates), 5)
+    # 設置 x 軸刻度，顯示每 5 個交易日的日期
+    tick_indices = np.arange(0, len(valid_dates), 5)  # 每 5 個交易日顯示一個刻度
     tick_dates = [date_labels[i] for i in tick_indices]
 
     fig.update_layout(
@@ -324,11 +328,11 @@ def create_price_comparison_chart(dates, actual_prices, predicted_prices, stock_
         hovermode='x unified',
         xaxis=dict(
             tickmode='array',
-            tickvals=[valid_dates[i] for i in tick_indices],
-            ticktext=tick_dates,
+            tickvals=[valid_dates[i] for i in tick_indices],  # 使用交易日的日期作為刻度值
+            ticktext=tick_dates,  # 顯示對應的日期標籤
             tickformat='%Y-%m-%d',
             tickangle=45,
-            type='date',
+            type='date',  # 確保 x 軸按日期格式處理
             rangeslider=dict(visible=False)
         ),
         template='plotly_white',
@@ -505,13 +509,17 @@ def main():
                     is_training=False
                 )
                 predictions = predict_step(model, X_test)
-                predictions_np = predictions.numpy().astype(np.float64)
-                y_test_np = y_test.astype(np.float64)
-                y_current_test_np = y_current_test.astype(np.float64)
-                st.write(f"MAE with y_current: {mean_absolute_error(y_current_test_np, predictions_np)}")
-                st.write(f"MAE with y: {mean_absolute_error(y_test_np, predictions_np)}")
-                predictions = scaler_target.inverse_transform(predictions_np.reshape(-1, 1))
-                y_current_test = scaler_target.inverse_transform(y_current_test_np.reshape(-1, 1))
+                # 將 TensorFlow 張量轉換為 NumPy 陣列
+                predictions_np = predictions.numpy()  # 將 tf.Tensor 轉為 numpy.ndarray
+                # 計算 MAE
+                st.write(f"predictions_np shape: {predictions_np.shape}")
+                st.write(f"y_current_test shape: {y_current_test.shape}")
+                st.write(f"y_test shape: {y_test.shape}")
+                st.write(f"MAE with y_current: {mean_absolute_error(y_current_test, predictions_np)}")
+                st.write(f"MAE with y: {mean_absolute_error(y_test, predictions_np)}")
+                # 繼續反向縮放
+                predictions = scaler_target.inverse_transform(predictions)
+                y_current_test = scaler_target.inverse_transform(y_current_test)
                 progress_bar.progress(80)
                 status_text.text("步驟 5/5: 執行回測...")
                 result = backtest(full_data, predictions, test_dates, period_start, period_end)
@@ -530,7 +538,9 @@ def main():
                 period_start = pd.to_datetime(period_start)
                 period_end = pd.to_datetime(period_end)
 
+                # 創建完整的日期範圍（包括非交易日）
                 full_date_range = pd.date_range(start=period_start, end=period_end, freq='D', tz=eastern)
+                # 過濾 test_dates，確保包含在回測時段內的日期
                 mask = (test_dates >= period_start) & (test_dates <= period_end)
                 filtered_dates = test_dates[mask]
                 if len(filtered_dates) == 0:
@@ -538,15 +548,18 @@ def main():
                         f"過濾後的日期範圍為空！請檢查回測時段 ({period_start} 到 {period_end}) 是否在測試數據範圍 ({test_dates[0]} 到 {test_dates[-1]}) 內。")
                     return
 
+                # 獲取實際價格和預測價格
                 filtered_y_test = full_data.loc[filtered_dates, 'Close'].values
                 filtered_predictions = predictions[mask]
                 if filtered_predictions.ndim > 1:
                     filtered_predictions = filtered_predictions.flatten()
 
+                # 將 filtered_dates 擴展到完整的日期範圍
                 extended_dates = full_date_range
                 extended_y_test = np.full(len(extended_dates), np.nan)
                 extended_predictions = np.full(len(extended_dates), np.nan)
 
+                # 將 filtered_dates 的數據映射到 extended_dates
                 date_to_idx = {d.date(): i for i, d in enumerate(extended_dates)}
                 for i, date in enumerate(filtered_dates):
                     idx = date_to_idx.get(date.date())
@@ -554,6 +567,7 @@ def main():
                         extended_y_test[idx] = filtered_y_test[i]
                         extended_predictions[idx] = filtered_predictions[i]
 
+                # 調整 buy_signals 和 sell_signals 的日期，使其匹配 extended_dates
                 def adjust_signals(signals, date_to_idx):
                     adjusted_signals = []
                     for date, price in signals:
@@ -567,6 +581,7 @@ def main():
                 buy_signals_actual = adjust_signals(buy_signals_actual, date_to_idx)
                 sell_signals_actual = adjust_signals(sell_signals_actual, date_to_idx)
 
+                # 繪製圖表
                 fig_loss = go.Figure()
                 fig_loss.add_trace(go.Scatter(y=history['loss'], mode='lines', name='Training Loss'))
                 fig_loss.add_trace(go.Scatter(y=history['val_loss'], mode='lines', name='Validation Loss'))
@@ -791,8 +806,8 @@ def main():
                     st.error(str(e))
                     return
                 historical_predictions = predict_step(model, X_new)
-                historical_predictions = scaler_target.inverse_transform(historical_predictions.numpy().astype(np.float64).reshape(-1, 1))
-                y_current_new = scaler_target.inverse_transform(y_current_new.astype(np.float64).reshape(-1, 1))
+                historical_predictions = scaler_target.inverse_transform(historical_predictions)
+                y_current_new = scaler_target.inverse_transform(y_current_new)
                 future_predictions = []
                 last_sequence = X_new[-1].copy()
                 last_close = float(full_data['Close'].iloc[-1])
@@ -801,7 +816,7 @@ def main():
                 last_low = float(full_data['Low'].iloc[-1])
                 for _ in range(future_days):
                     pred = predict_step(model, last_sequence[np.newaxis, :])
-                    pred_price = scaler_target.inverse_transform(pred.numpy().astype(np.float64).reshape(-1, 1))[0, 0]
+                    pred_price = scaler_target.inverse_transform(pred)[0, 0]
                     future_predictions.append(pred_price)
                     new_features = [last_close, last_open, last_high, last_low, (last_high + last_low + pred_price) / 3]
                     scaled_new_features = scaler_features.transform([new_features])
