@@ -505,9 +505,9 @@ def main():
                     is_training=False
                 )
                 predictions = predict_step(model, X_test)
-                predictions_np = predictions.numpy()
-                y_test_np = y_test
-                y_current_test_np = y_current_test
+                predictions_np = predictions.numpy().astype(np.float64)
+                y_test_np = y_test.astype(np.float64)
+                y_current_test_np = y_current_test.astype(np.float64)
                 st.write(f"MAE with y_current: {mean_absolute_error(y_current_test_np, predictions_np)}")
                 st.write(f"MAE with y: {mean_absolute_error(y_test_np, predictions_np)}")
                 predictions = scaler_target.inverse_transform(predictions_np)
@@ -791,8 +791,8 @@ def main():
                     st.error(str(e))
                     return
                 historical_predictions = predict_step(model, X_new)
-                historical_predictions = scaler_target.inverse_transform(historical_predictions)
-                y_current_new = scaler_target.inverse_transform(y_current_new)
+                historical_predictions = scaler_target.inverse_transform(historical_predictions.numpy().astype(np.float64))
+                y_current_new = scaler_target.inverse_transform(y_current_new.astype(np.float64))
                 future_predictions = []
                 last_sequence = X_new[-1].copy()
                 last_close = float(full_data['Close'].iloc[-1])
@@ -801,7 +801,7 @@ def main():
                 last_low = float(full_data['Low'].iloc[-1])
                 for _ in range(future_days):
                     pred = predict_step(model, last_sequence[np.newaxis, :])
-                    pred_price = scaler_target.inverse_transform(pred)[0, 0]
+                    pred_price = scaler_target.inverse_transform(pred.numpy().astype(np.float64))[0, 0]
                     future_predictions.append(pred_price)
                     new_features = [last_close, last_open, last_high, last_low, (last_high + last_low + pred_price) / 3]
                     scaled_new_features = scaler_features.transform([new_features])
